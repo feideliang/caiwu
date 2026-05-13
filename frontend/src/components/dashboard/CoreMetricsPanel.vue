@@ -19,31 +19,63 @@
 
       <!-- Section 1: 核心盈利能力 -->
       <a-card title="核心盈利能力" size="small" class="section-card">
-        <a-row :gutter="[16, 16]">
-          <a-col :xs="12" :sm="12" :md="8" :lg="5" v-for="item in profitabilityCards" :key="item.title">
+        <!-- 市场线卡片 -->
+        <a-row :gutter="[16, 16]" class="market-line-row">
+          <a-col :span="12">
+            <div class="market-card">
+              <div class="market-card-label">核心市场线</div>
+              <div class="market-card-value">{{ data?.summary?.core_market_line || '-' }}</div>
+              <div class="market-card-sub">收入贡献 <strong>{{ toWan(data?.summary?.core_market_line_revenue) || 0 }}万</strong></div>
+            </div>
+          </a-col>
+          <a-col :span="12">
+            <div class="market-card">
+              <div class="market-card-label">最具价值市场线</div>
+              <div class="market-card-value">{{ data?.summary?.highest_value_market_line || '-' }}</div>
+              <div class="market-card-sub">毛利贡献 <strong>{{ toWan(data?.summary?.highest_value_market_profit) || 0 }}万</strong></div>
+            </div>
+          </a-col>
+        </a-row>
+        <!-- 直签客户 -->
+        <a-row :gutter="[16, 16]" class="direct-sign-row">
+          <a-col :span="12">
             <KpiCard
-              :title="item.title"
-              :value="item.value"
-              :unit="item.unit"
-              :precision="item.precision"
-              :trend="item.trend"
+              title="直签客户收入"
+              :value="toWan(data?.summary?.direct_sign_revenue)"
+              unit="万元"
+              :precision="2"
+              :label-display="`收入占比 ${(data?.summary?.direct_sign_revenue_pct || 0).toFixed(1)}%`"
+            />
+          </a-col>
+          <a-col :span="12">
+            <KpiCard
+              title="直签客户毛利"
+              :value="toWan(data?.summary?.direct_sign_profit)"
+              unit="万元"
+              :precision="2"
+              :label-display="`毛利率 ${(data?.summary?.direct_sign_margin || 0).toFixed(1)}%`"
             />
           </a-col>
         </a-row>
       </a-card>
 
-      <!-- Section 2: 结构健康度 -->
+      <!-- Section 2: 结构健康度 (Top 10) -->
       <a-card title="结构健康度" size="small" class="section-card compact">
-        <a-row :gutter="[12, 12]">
-          <a-col :xs="24" :sm="12" :md="8" v-for="item in structureCards" :key="item.title">
-            <KpiCard
-              :title="item.title"
-              :value="item.value"
-              :unit="item.unit"
-              :precision="item.precision"
-            />
-          </a-col>
-        </a-row>
+        <div class="concentration-list">
+          <div class="concentration-title">客户收入 Top 10</div>
+          <div
+            v-for="(item, idx) in customerTop10"
+            :key="item.name"
+            class="concentration-item"
+          >
+            <span class="rank-badge" :class="idx < 3 ? 'top' : 'normal'">{{ idx + 1 }}</span>
+            <span class="name">{{ item.name }}</span>
+            <div class="progress-bar">
+              <div class="progress-fill" :style="{ width: item.percent + '%' }"></div>
+            </div>
+            <span class="pct">{{ item.percent.toFixed(1) }}%</span>
+          </div>
+        </div>
       </a-card>
 
       <!-- Section 3: 增长与质量 -->
@@ -59,33 +91,6 @@
             />
           </a-col>
         </a-row>
-        <a-table
-          v-if="marginAnalysis.length"
-          :columns="marginColumns"
-          :data-source="marginAnalysis"
-          :pagination="false"
-          size="small"
-          bordered
-          class="margin-table"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'current_revenue'">
-              {{ fmtWan(record.current_revenue) }}
-            </template>
-            <template v-if="column.key === 'previous_revenue'">
-              {{ fmtWan(record.previous_revenue) }}
-            </template>
-            <template v-if="column.key === 'structure_impact'">
-              <span :class="impactClass(record.structure_impact)">{{ fmtImpact(record.structure_impact) }}</span>
-            </template>
-            <template v-if="column.key === 'margin_impact'">
-              <span :class="impactClass(record.margin_impact)">{{ fmtImpact(record.margin_impact) }}</span>
-            </template>
-            <template v-if="column.key === 'total_impact'">
-              <span :class="impactClass(record.total_impact)">{{ fmtImpact(record.total_impact) }}</span>
-            </template>
-          </template>
-        </a-table>
       </a-card>
     </a-spin>
   </div>
@@ -95,9 +100,8 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import KpiCard from './KpiCard.vue';
 import { getCoreMetrics } from '@/api/metrics';
-import type { CoreMetricsResponse, MarginChangeItem } from '@/types/metrics';
+import type { CoreMetricsResponse } from '@/types/metrics';
 import { toWan } from '@/utils/format';
-import type { TableColumnsType } from 'ant-design-vue';
 
 const props = withDefaults(defineProps<{
   period?: string;
@@ -118,68 +122,28 @@ function num(v: number | undefined): number {
   return typeof v === 'number' ? v : 0;
 }
 
-const profitabilityCards = computed(() => {
-  const s = data.value?.summary || {};
-  return [
-    { title: '收入', value: toWan(s.revenue), unit: '万元', precision: 2, trend: s.revenue_yoy_growth },
-    { title: '不含税成本', value: toWan(s.tax_excluded_cost), unit: '万元', precision: 2 },
-    { title: '毛利额', value: toWan(s.gross_profit), unit: '万元', precision: 2, trend: s.gross_profit_yoy_growth },
-    { title: '毛利率', value: num(s.gross_margin), unit: '%', precision: 2 },
-    { title: '收入环比', value: num(s.revenue_mom_growth), unit: '%', precision: 2, trend: s.revenue_mom_growth },
-  ];
-});
-
-const structureCards = computed(() => {
-  const s = data.value?.summary || {};
-  return [
-    { title: '客户集中度Top3', value: num(s.customer_concentration_top3), unit: '%', precision: 2 },
-    { title: '产品集中度Top3', value: num(s.product_concentration_top3), unit: '%', precision: 2 },
-    { title: '单客户收入最高占比', value: num(s.top_customer_share), unit: '%', precision: 2 },
-  ];
+// Top 10 customer concentration list
+const customerTop10 = computed(() => {
+  const breakdowns = data.value?.customer_breakdown || [];
+  if (!breakdowns.length) return [];
+  const maxRevenue = Math.max(...breakdowns.map((b) => b.revenue || 0), 1);
+  const totalRevenue = breakdowns.reduce((sum, b) => sum + (b.revenue || 0), 0) || 1;
+  return breakdowns.slice(0, 10).map((b) => ({
+    name: b.dimension_value,
+    percent: ((b.revenue || 0) / totalRevenue * 100),
+    width: ((b.revenue || 0) / maxRevenue * 100),
+  }));
 });
 
 const growthCards = computed(() => {
   const s = data.value?.summary || {};
+  const avgMonthlyGrowth = num(s.revenue_mom_growth); // reuse existing MoM growth as avg monthly growth
   return [
-    { title: '收入连续增长', value: num(s.revenue_consecutive_growth), unit: '期', precision: 0, trend: s.revenue_consecutive_growth },
-    { title: '毛利连续增长', value: num(s.gross_profit_consecutive_growth), unit: '期', precision: 0, trend: s.gross_profit_consecutive_growth },
-    { title: '高毛利订单占比', value: num(s.high_margin_order_ratio), unit: '%', precision: 2 },
-    { title: '毛利率波动', value: num(s.gross_margin_volatility), unit: '%', precision: 2 },
+    { title: '平均月度增长', value: Math.abs(avgMonthlyGrowth), unit: `%`, precision: 2, trend: avgMonthlyGrowth, trendNote: '月' },
+    { title: '负毛利订单占比', value: num(s.negative_margin_order_ratio), unit: '%', precision: 2, trendNote: `负毛利金额 ${toWan(s.negative_margin_order_amount) || 0}万` },
+    { title: '负毛利产品占比', value: num(s.negative_margin_product_ratio), unit: '%', precision: 2, trendNote: `负毛利金额 ${toWan(s.negative_margin_product_amount) || 0}万` },
   ];
 });
-
-const marginAnalysis = computed<MarginChangeItem[]>(() => {
-  return data.value?.summary?.margin_change_analysis || [];
-});
-
-const marginColumns: TableColumnsType = [
-  { title: '维度', dataIndex: 'dimension_value', key: 'dimension_value', width: 80, fixed: 'left' },
-  { title: '当期收入(万)', key: 'current_revenue', width: 90, align: 'right' },
-  { title: '当期占比%', dataIndex: 'current_share', key: 'current_share', width: 80, align: 'right', customRender: ({ text }) => text?.toFixed(2) },
-  { title: '当期毛利率%', dataIndex: 'current_margin', key: 'current_margin', width: 80, align: 'right', customRender: ({ text }) => text?.toFixed(2) },
-  { title: '基期收入(万)', key: 'previous_revenue', width: 90, align: 'right' },
-  { title: '基期占比%', dataIndex: 'previous_share', key: 'previous_share', width: 80, align: 'right', customRender: ({ text }) => text?.toFixed(2) },
-  { title: '基期毛利率%', dataIndex: 'previous_margin', key: 'previous_margin', width: 80, align: 'right', customRender: ({ text }) => text?.toFixed(2) },
-  { title: '占比变化', dataIndex: 'share_change', key: 'share_change', width: 70, align: 'right', customRender: ({ text }) => text?.toFixed(2) + '%' },
-  { title: '毛利率变化', dataIndex: 'margin_change', key: 'margin_change', width: 80, align: 'right', customRender: ({ text }) => text?.toFixed(2) + '%' },
-  { title: '结构影响', key: 'structure_impact', width: 80, align: 'right' },
-  { title: '毛利影响', key: 'margin_impact', width: 80, align: 'right' },
-  { title: '合计', key: 'total_impact', width: 80, align: 'right' },
-];
-
-function fmtWan(v: number) {
-  return toWan(v)?.toFixed(2) || '0';
-}
-
-function fmtImpact(v: number) {
-  return v.toFixed(2) + '%';
-}
-
-function impactClass(v: number) {
-  if (v > 0) return 'impact-positive';
-  if (v < 0) return 'impact-negative';
-  return 'impact-neutral';
-}
 
 async function fetchData() {
   loading.value = true;
@@ -217,16 +181,91 @@ onMounted(fetchData);
 .quality-alert {
   margin-bottom: 8px;
 }
-.margin-table {
-  margin-top: 12px;
+
+// Market line cards
+.market-line-row {
+  margin-bottom: 12px;
 }
-.impact-positive {
-  color: #52c41a;
+.market-card {
+  padding: 12px 16px;
+  background: var(--color-bg-layout);
+  border-radius: 8px;
+  &-label {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    margin-bottom: 4px;
+  }
+  &-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+  &-sub {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    margin-top: 4px;
+  }
 }
-.impact-negative {
-  color: #f5222d;
+.direct-sign-row {
+  margin-bottom: 0;
 }
-.impact-neutral {
-  color: #999;
+
+// Concentration list
+.concentration-list {
+  .concentration-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--color-text);
+  }
+  .concentration-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    .rank-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      font-size: 11px;
+      font-weight: 600;
+      color: #fff;
+      &.top {
+        background: #faad14;
+      }
+      &.normal {
+        background: #d9d9d9;
+        color: #666;
+      }
+    }
+    .name {
+      width: 80px;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .progress-bar {
+      flex: 1;
+      height: 8px;
+      background: #f0f0f0;
+      border-radius: 4px;
+      overflow: hidden;
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #1677ff, #4096ff);
+        border-radius: 4px;
+      }
+    }
+    .pct {
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      min-width: 45px;
+      text-align: right;
+    }
+  }
 }
 </style>

@@ -89,13 +89,61 @@ const chartOption = computed(() => {
   const valueKeys = Object.keys(props.data[0]).filter((k) => k !== xKey);
 
   switch (props.chartType) {
-    case 'line':
-      return {
-        ...baseOption,
-        xAxis: { type: 'category' as const, data: props.data.map((d) => d[xKey]), axisLabel: { rotate: isMobile.value ? 45 : 0 } },
-        yAxis: { type: 'value' as const },
-        series: valueKeys.map((key) => ({ name: key, type: 'line', data: props.data.map((d) => d[key]), smooth: true })),
-      };
+  case 'line': {
+    // Chinese legend mapping
+    const legendMap: Record<string, string> = {
+      revenue: '营业收入',
+      cost: '营业成本',
+      gross_profit: '毛利额',
+      gross_margin: '毛利率',
+    };
+    const hasMargin = valueKeys.includes('gross_margin');
+    const mainKeys = valueKeys.filter((k) => k !== 'gross_margin');
+
+    return {
+      ...baseOption,
+      grid: {
+        top: 30,
+        bottom: isMobile.value ? 50 : 40,
+        left: isMobile.value ? 40 : 60,
+        right: hasMargin ? 60 : 20,
+      },
+      xAxis: { type: 'category' as const, data: props.data.map((d) => d[xKey]), axisLabel: { rotate: isMobile.value ? 45 : 0 } },
+      yAxis: [
+        { type: 'value' as const, name: '万元', position: 'left' as const },
+        ...(hasMargin ? [{ type: 'value' as const, name: '%', position: 'right' as const, max: (v: any) => Math.ceil(v.max * 1.2) }] : []),
+      ],
+      series: [
+        ...mainKeys.map((key) => ({
+          name: legendMap[key] || key,
+          type: 'line' as const,
+          yAxisIndex: 0,
+          data: props.data.map((d) => Math.round(Number(d[key]) / 10000 * 100) / 100),
+          smooth: true,
+        })),
+        ...(hasMargin ? [{
+          name: legendMap.gross_margin,
+          type: 'line' as const,
+          yAxisIndex: 1,
+          data: props.data.map((d) => d['gross_margin']),
+          smooth: true,
+          lineStyle: { type: 'dashed' as const },
+        }] : []),
+      ],
+      tooltip: {
+        trigger: 'axis' as const,
+        formatter: (params: any[]) => {
+          let s = `${params[0]?.axisValue || ''}<br/>`;
+          params.forEach((p: any) => {
+            const val = p.seriesName === '毛利率' ? `${p.value}%` : `${p.value}万元`;
+            s += `${p.marker} ${p.seriesName}: ${val}<br/>`;
+          });
+          return s;
+        },
+      },
+      legend: { bottom: 0, type: 'scroll' as const },
+    };
+  }
     case 'area':
       return {
         ...baseOption,

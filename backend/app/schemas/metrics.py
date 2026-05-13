@@ -29,6 +29,18 @@ class CoreMetricsSummary(BaseModel):
     loss_ratio: float | None = None
     core_market_line: str | None = None
     highest_value_market_line: str | None = None
+    core_market_line_revenue: float | None = None
+    highest_value_market_profit: float | None = None
+    # Direct sign customer metrics
+    direct_sign_revenue: float | None = None
+    direct_sign_revenue_pct: float | None = None
+    direct_sign_profit: float | None = None
+    direct_sign_margin: float | None = None
+    # Negative margin metrics
+    negative_margin_order_ratio: float | None = None
+    negative_margin_order_amount: float | None = None
+    negative_margin_product_ratio: float | None = None
+    negative_margin_product_amount: float | None = None
 
 
 class BreakdownItem(BaseModel):
@@ -78,6 +90,7 @@ class CoreMetricsResponse(BaseModel):
     entity: str | None = None
     summary: CoreMetricsSummary
     breakdowns: list[BreakdownItem] = Field(default_factory=list)
+    customer_breakdown: list[BreakdownItem] = Field(default_factory=list)
     trend_series: list[TrendDataPoint] = Field(default_factory=list)
     dimension_trend_series: list[DimensionTrendPoint] = Field(default_factory=list)
     data_quality: DataQuality

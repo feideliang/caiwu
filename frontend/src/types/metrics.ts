@@ -23,6 +23,19 @@ export interface CoreMetricsSummary {
   loss_ratio?: number;
   core_market_line?: string;
   highest_value_market_line?: string;
+  // Market line details
+  core_market_line_revenue?: number;
+  highest_value_market_profit?: number;
+  // Direct sign customer metrics
+  direct_sign_revenue?: number;
+  direct_sign_revenue_pct?: number;
+  direct_sign_profit?: number;
+  direct_sign_margin?: number;
+  // Negative margin metrics
+  negative_margin_order_ratio?: number;
+  negative_margin_order_amount?: number;
+  negative_margin_product_ratio?: number;
+  negative_margin_product_amount?: number;
 }
 
 export interface MarginChangeItem {
@@ -82,6 +95,7 @@ export interface CoreMetricsResponse {
   dimension: string;
   summary: CoreMetricsSummary;
   breakdowns: BreakdownItem[];
+  customer_breakdown: BreakdownItem[];
   trend_series: TrendDataPoint[];
   dimension_trend_series: DimensionTrendPoint[];
   data_quality: DataQuality;

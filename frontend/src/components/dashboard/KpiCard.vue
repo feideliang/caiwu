@@ -19,7 +19,7 @@
         <span v-if="trend !== undefined" :class="['trend', trendClass]">
           <CaretUpOutlined v-if="trend > 0" />
           <CaretDownOutlined v-else-if="trend < 0" />
-          {{ Math.abs(trend) }}%
+          {{ Math.abs(trend) }}{{ trendSuffix }}
         </span>
       </template>
     </a-statistic>
@@ -41,6 +41,7 @@ const props = withDefaults(defineProps<{
   unit?: string;
   precision?: number;
   trend?: number;
+  trendSuffix?: string;
   color?: string;
   icon?: Component;
   alert?: 'red' | 'yellow' | 'blue';
@@ -49,6 +50,7 @@ const props = withDefaults(defineProps<{
   unit: '',
   precision: 2,
   trend: undefined,
+  trendSuffix: '%',
   color: undefined,
   icon: undefined,
   alert: undefined,

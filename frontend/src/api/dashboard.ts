@@ -5,6 +5,9 @@ export interface BffQueryParams {
   date_to?: string;
   department?: string;
   product?: string;
+  period_dimension?: string; // monthly / quarterly / cumulative / custom
+  period_start?: string;
+  period_end?: string;
   filters?: Record<string, unknown>;
   period_compare_type?: 'yoy' | 'mom' | 'cumulative';
 }
@@ -14,17 +17,21 @@ export interface TrendItem {
   revenue: number;
   cost: number;
   gross_profit: number;
+  gross_margin: number;
 }
 
 export interface KpiData {
   revenue: number;
+  cost: number;
   gross_profit: number;
   gross_margin: number;
   achievement_rate: number;
   revenue_mom_growth: number;
   profit_mom_growth: number;
+  cost_yoy_growth: number;
   revenue_yoy_growth: number;
   profit_yoy_growth: number;
+  gross_margin_yoy_change: number;
   revenue_cumulative: number;
   profit_cumulative: number;
   revenue_cumulative_growth: number;

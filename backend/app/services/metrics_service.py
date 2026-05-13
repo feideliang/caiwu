@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Iterable
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.core import FinancialData
@@ -114,6 +114,7 @@ class MetricsService:
                 entity=entity,
                 summary=CoreMetricsSummary(),
                 breakdowns=[],
+                customer_breakdown=[],
                 trend_series=[],
                 data_quality=DataQuality(
                     calculable=False,
@@ -154,10 +155,21 @@ class MetricsService:
         period_customer_rev: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         # period -> product_line -> gross_profit
         period_product_gp: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        # period -> product_line -> {revenue, cost, gross_profit}
+        period_product_bucket: dict[str, dict[str, dict[str, float]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(float))
+        )
         # period -> order_id -> {revenue, cost, gross_profit}
         period_order: dict[str, dict[str, dict[str, float]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(float))
         )
+        # period -> customer -> revenue (for customer_breakdown top 10)
+        period_customer_bucket: dict[str, dict[str, dict[str, float]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(float))
+        )
+        # direct sign customer metrics (contract_type == "直签")
+        direct_sign_rev: float = 0.0
+        direct_sign_gp: float = 0.0
 
         for row in rows:
             bucket = _bucket(row.metric_name)
@@ -173,17 +185,30 @@ class MetricsService:
 
             tags = row.tags or {}
             customer = tags.get("customer") or tags.get("customer_name")
-            if customer and bucket == "revenue":
-                period_customer_rev[p][customer] += v
+            if customer:
+                if bucket == "revenue":
+                    period_customer_rev[p][customer] += v
+                # Customer breakdown: collect revenue, cost, gross_profit per customer
+                if bucket:
+                    period_customer_bucket[p][customer][bucket] += v
 
             product = tags.get("product_line") or tags.get("product") or tags.get("series")
             if product and bucket in ("gross_profit", "revenue", "cost"):
+                period_product_bucket[p][product][bucket] += v
                 if bucket == "gross_profit":
                     period_product_gp[p][product] += v
 
             order_id = tags.get("order_id") or tags.get("contract_no")
             if order_id:
                 period_order[p][order_id][bucket] += v
+
+            # Direct sign customer: tags.contract_type == "直签"
+            contract_type = tags.get("contract_type")
+            if contract_type == "直签" and p == current_period:
+                if bucket == "revenue":
+                    direct_sign_rev += v
+                elif bucket == "gross_profit":
+                    direct_sign_gp += v
 
         def _bucket_values(p: str) -> tuple[float | None, float | None, float | None]:
             buckets = period_bucket.get(p, {})
@@ -305,6 +330,7 @@ class MetricsService:
         if dim_buckets := period_dim_bucket.get(current_period, {}):
             top_dim = max(dim_buckets.items(), key=lambda x: x[1].get("revenue", 0))
             summary.core_market_line = str(top_dim[0])
+            summary.core_market_line_revenue = _round(top_dim[1].get("revenue", 0))
             # Highest value market line (top gross_profit)
             top_gp_dim = max(
                 dim_buckets.items(),
@@ -315,6 +341,46 @@ class MetricsService:
                 ),
             )
             summary.highest_value_market_line = str(top_gp_dim[0])
+            top_gp = top_gp_dim[1].get("gross_profit")
+            if top_gp is None:
+                top_gp = top_gp_dim[1].get("revenue", 0) - top_gp_dim[1].get("cost", 0)
+            summary.highest_value_market_profit = _round(top_gp)
+
+        # Direct sign customer metrics
+        if direct_sign_rev:
+            summary.direct_sign_revenue = _round(direct_sign_rev)
+            summary.direct_sign_revenue_pct = _round(_safe_div(direct_sign_rev, rev) * 100 if rev else 0)
+            summary.direct_sign_profit = _round(direct_sign_gp)
+            summary.direct_sign_margin = _round(_safe_div(direct_sign_gp, direct_sign_rev) * 100)
+
+        # Negative margin order metrics
+        neg_margin_orders: list[tuple[float, float]] = []  # (revenue, gross_profit)
+        for oid, bk in orders.items():
+            o_rev = bk.get("revenue")
+            o_cost = bk.get("cost")
+            o_gp = bk.get("gross_profit")
+            if o_gp is None and o_rev is not None and o_cost is not None:
+                o_gp = o_rev - o_cost
+            if o_rev is not None and o_gp is not None and o_gp < 0:
+                neg_margin_orders.append((o_rev, o_gp))
+        total_orders_count = len(orders)
+        if total_orders_count:
+            summary.negative_margin_order_ratio = _round(len(neg_margin_orders) / total_orders_count * 100)
+            summary.negative_margin_order_amount = _round(sum(gp for _, gp in neg_margin_orders))
+
+        # Negative margin product metrics
+        all_products = set()
+        neg_margin_products: list[float] = []  # gross_profit values
+        for prod, bk in period_product_bucket.get(current_period, {}).items():
+            all_products.add(prod)
+            p_gp = bk.get("gross_profit")
+            if p_gp is None:
+                p_gp = (bk.get("revenue", 0) or 0) - (bk.get("cost", 0) or 0)
+            if p_gp < 0:
+                neg_margin_products.append(p_gp)
+        if all_products:
+            summary.negative_margin_product_ratio = _round(len(neg_margin_products) / len(all_products) * 100)
+            summary.negative_margin_product_amount = _round(sum(neg_margin_products))
 
         # ── Per-dimension order counts ─────────────────────
         # Map order_id -> dimension_value, then count per dim
@@ -513,12 +579,37 @@ class MetricsService:
             margin_analysis.sort(key=lambda x: abs(x["total_impact"]), reverse=True)
             summary.margin_change_analysis = margin_analysis
 
+        # ── Customer breakdown (Top 10 by revenue) ──────────────
+        customer_breakdown: list[BreakdownItem] = []
+        cust_buckets = period_customer_bucket.get(current_period, {})
+        total_cust_rev = sum(bk.get("revenue", 0) for bk in cust_buckets.values())
+        for cust_name, bk in sorted(
+            cust_buckets.items(), key=lambda x: x[1].get("revenue", 0), reverse=True
+        )[:10]:
+            c_rev = bk.get("revenue")
+            c_cost = bk.get("cost")
+            c_gp = bk.get("gross_profit")
+            if c_gp is None and c_rev is not None and c_cost is not None:
+                c_gp = c_rev - c_cost
+            c_gm = _safe_div(c_gp, c_rev) * 100 if (c_gp is not None and c_rev) else None
+            c_contrib = _safe_div(c_gp, total_cust_rev) * 100 if (c_gp is not None and total_cust_rev) else None
+            customer_breakdown.append(BreakdownItem(
+                dimension_value=cust_name,
+                revenue=_round(c_rev),
+                tax_excluded_cost=_round(c_cost),
+                gross_profit=_round(c_gp),
+                gross_margin=_round(c_gm),
+                gross_margin_contribution=_round(c_contrib),
+                calculable=(c_rev is not None and c_gp is not None),
+            ))
+
         return CoreMetricsResponse(
             period=current_period,
             dimension=dimension,
             entity=entity,
             summary=summary,
             breakdowns=breakdowns,
+            customer_breakdown=customer_breakdown,
             trend_series=trend,
             dimension_trend_series=dim_trend,
             data_quality=DataQuality(

@@ -48,6 +48,8 @@ _ACHIEVEMENT_KW = ("achievement_rate", "达成率")
 async def _build_kpis(
     db: AsyncSession,
     period_compare_type: str | None = None,
+    period_dimension: str | None = None,
+    period: str | None = None,
     department: str | None = None,
     product: str | None = None,
 ) -> dict:
@@ -64,7 +66,11 @@ async def _build_kpis(
         # We'll use text() queries below with this filter
 
     trend_periods = await _periods(db, limit=24, department=department, product=product)  # need more for YoY
-    current_period = trend_periods[0] if trend_periods else None
+    # Use explicit period if provided, otherwise auto-detect latest
+    current_period = period if period else (trend_periods[0] if trend_periods else None)
+    # If explicit period not in trend_periods list, add it
+    if period and period not in trend_periods:
+        trend_periods.insert(0, period)
     previous_period = trend_periods[1] if len(trend_periods) > 1 else None
 
     # Compute YoY period (same month last year)
@@ -131,9 +137,13 @@ async def _build_kpis(
 
     # YoY (year-over-year)
     yoy_revenue = _sum(yoy_period, *_REVENUE_KW) if yoy_period else 0.0
+    yoy_cost = _sum(yoy_period, *_COST_KW) if yoy_period else 0.0
     yoy_profit = _sum(yoy_period, *_PROFIT_KW) if yoy_period else 0.0
+    yoy_gross_margin = round((yoy_profit / yoy_revenue * 100), 2) if yoy_revenue else 0.0
     revenue_yoy_growth = round(((revenue - yoy_revenue) / yoy_revenue * 100), 2) if yoy_revenue else 0.0
+    cost_yoy_growth = round(((cost - yoy_cost) / yoy_cost * 100), 2) if yoy_cost else 0.0
     profit_yoy_growth = round(((gross_profit - yoy_profit) / yoy_profit * 100), 2) if yoy_profit else 0.0
+    gross_margin_yoy_change = round(gross_margin - yoy_gross_margin, 2) if yoy_revenue else 0.0
 
     # Cumulative YTD
     year_prefix = current_period[:4] if current_period else None
@@ -148,29 +158,43 @@ async def _build_kpis(
     revenue_cumulative_growth = round(((ytd_revenue - ytd_revenue_ly) / ytd_revenue_ly * 100), 2) if ytd_revenue_ly else 0.0
     profit_cumulative_growth = round(((ytd_profit - ytd_profit_ly) / ytd_profit_ly * 100), 2) if ytd_profit_ly else 0.0
 
-    # Trend series (last 6 periods)
-    trend_periods_6 = trend_periods[:6]
+    # Trend series: Jan of previous year to latest month (full year range)
+    sorted_periods = sorted(trend_periods)
+    if sorted_periods:
+        latest = sorted_periods[-1]
+        latest_year = int(latest[:4])
+        start_year = latest_year - 1
+        # Filter periods from Jan of previous year to latest
+        trend_full = [p for p in sorted_periods if p >= f"{start_year}-01" and p <= latest]
+    else:
+        trend_full = []
+
     trend_series = []
-    for tp in sorted(trend_periods_6):
+    for tp in trend_full:
         tr = _sum(tp, *_REVENUE_KW)
         tc = _sum(tp, *_COST_KW)
         tg = tr - tc
+        tm = round((tg / tr * 100), 2) if tr else 0.0
         trend_series.append({
             "period": tp,
             "revenue": round(tr, 2),
             "cost": round(tc, 2),
             "gross_profit": round(tg, 2),
+            "gross_margin": tm,
         })
 
     return {
         "revenue": round(revenue, 2),
+        "cost": round(cost, 2),
         "gross_profit": round(gross_profit, 2),
         "gross_margin": gross_margin,
         "achievement_rate": round(achievement_rate, 2),
         "revenue_mom_growth": revenue_mom_growth,
         "profit_mom_growth": profit_mom_growth,
+        "cost_yoy_growth": cost_yoy_growth,
         "revenue_yoy_growth": revenue_yoy_growth,
         "profit_yoy_growth": profit_yoy_growth,
+        "gross_margin_yoy_change": gross_margin_yoy_change,
         "revenue_cumulative": round(ytd_revenue, 2),
         "profit_cumulative": round(ytd_profit, 2),
         "revenue_cumulative_growth": revenue_cumulative_growth,
@@ -295,7 +319,7 @@ async def dashboard_bff(
     _user = Depends(get_current_user),
 ) -> APIResponse:
     """Fetch a complete dashboard with chart data, optimized for the target device."""
-    cache_key = f"dashboard:bff:{body.dashboard_id or 'default'}:{body.device_type}:{body.period or ''}:{body.department or ''}:{body.product or ''}"
+    cache_key = f"dashboard:bff:{body.dashboard_id or 'default'}:{body.device_type}:{body.period or ''}:{body.period_dimension or ''}:{body.department or ''}:{body.product or ''}"
 
     if not body.bypass_cache:
         cached = await cache_get(cache_key)
@@ -389,7 +413,7 @@ async def dashboard_bff(
         dashboard_id=layout.id,
         dashboard_name=layout.name,
         device_type=body.device_type,
-        kpis=KpiData(**(await _build_kpis(db, body.period_compare_type, department=body.department, product=body.product))),
+        kpis=KpiData(**(await _build_kpis(db, body.period_compare_type, period_dimension=body.period_dimension, period=body.period, department=body.department, product=body.product))),
         charts=chart_data_items,
         layout=layout.layout_config,
         updated_at=datetime.now(timezone.utc).isoformat(),

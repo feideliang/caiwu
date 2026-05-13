@@ -1,10 +1,31 @@
 <template>
   <div class="dashboard-page">
-    <!-- Filter bar + divider: full-width header row -->
+    <!-- Filter bar: 周期维度 + 筛选周期 + 市场线 + 产品线 -->
     <div class="dashboard-header">
       <a-space wrap>
-        <a-select v-model:value="selectedYear" :options="yearOptions" style="width: 120px" placeholder="年" allow-clear />
-        <a-select v-model:value="selectedMonth" :options="monthOptions" style="width: 120px" placeholder="月" allow-clear />
+        <a-select v-model:value="periodDimension" style="width: 120px" placeholder="周期维度">
+          <a-select-option value="monthly">月度</a-select-option>
+          <a-select-option value="quarterly">季度</a-select-option>
+          <a-select-option value="cumulative">年累计</a-select-option>
+          <a-select-option value="custom">自定义期间</a-select-option>
+        </a-select>
+        <a-range-picker
+          v-if="periodDimension === 'custom'"
+          v-model:value="customRange"
+          picker="month"
+          :allow-clear="true"
+          style="width: 280px"
+          format="YYYY年M月"
+          @change="onCustomRangeChange"
+        />
+        <a-select
+          v-else
+          v-model:value="selectedPeriod"
+          :options="periodSelectOptions"
+          style="width: 160px"
+          placeholder="筛选周期"
+          allow-clear
+        />
         <a-divider type="vertical" />
         <a-select v-model:value="selectedMarketLine" :options="marketLineOptions" style="width: 160px" placeholder="市场线" allow-clear />
         <a-select v-model:value="selectedProduct" :options="productOptions" style="width: 160px" placeholder="产品线" allow-clear />
@@ -12,7 +33,14 @@
     </div>
     <!-- Content: left = overview, right = assistant -->
     <div class="dashboard-content">
-      <FinancialOverview :period="period" :period-compare-type="periodCompareType" :department="selectedMarketLine" :product="selectedProduct" />
+      <FinancialOverview
+        :period="period"
+        :period-dimension="periodDimension"
+        :period-start="periodStart"
+        :period-end="periodEnd"
+        :department="selectedMarketLine"
+        :product="selectedProduct"
+      />
     </div>
     <div v-if="showAssistant" class="dashboard-assistant">
       <FinancialAssistantPanel :context="assistantContext" />
@@ -30,30 +58,102 @@ const isSmall = ref(window.innerWidth < 1024);
 const loading = ref(false);
 
 // Filter state
-const selectedYear = ref<string | undefined>();
-const selectedMonth = ref<string | undefined>();
+const periodDimension = ref<string>('cumulative'); // monthly / quarterly / cumulative / custom
+const selectedPeriod = ref<string | undefined>();
+const customRange = ref<[any, any] | null>(null);
+const periodStart = ref<string | undefined>();
+const periodEnd = ref<string | undefined>();
 const selectedMarketLine = ref<string | undefined>();
 const selectedProduct = ref<string | undefined>();
 
-// Derived period string (e.g. '2026-03')
+// Raw period list from backend
+const allPeriods = ref<string[]>([]);
+
+// Derived period for simple month filter (monthly mode)
 const period = computed(() => {
-  if (selectedYear.value && selectedMonth.value) {
-    return `${selectedYear.value}-${selectedMonth.value}`;
+  if (periodDimension.value === 'monthly' || periodDimension.value === 'cumulative') {
+    return selectedPeriod.value;
+  }
+  if (periodDimension.value === 'quarterly') {
+    return undefined; // handled by periodStart/periodEnd
   }
   return undefined;
 });
 
-// Period compare type is NOT shown in UI, kept as AI context default
-const periodCompareType = ref<'yoy' | 'mom' | 'cumulative'>('mom');
+// Dynamic period select options based on dimension
+const periodSelectOptions = computed<Array<{ label: string; value: string }>>(() => {
+  if (periodDimension.value === 'quarterly') {
+    const quarters = new Set<string>();
+    for (const p of allPeriods.value) {
+      if (p.includes('-')) {
+        const [y, m] = p.split('-');
+        const q = Math.ceil(parseInt(m) / 3);
+        quarters.add(`${y}Q${q}`);
+      }
+    }
+    return [...quarters].sort().map((v) => ({ label: v, value: v }));
+  }
+  // monthly or cumulative: month options like "2026年1月"
+  const months = new Set<string>();
+  for (const p of allPeriods.value) {
+    if (p.includes('-')) {
+      const [y, m] = p.split('-');
+      months.add(`${y}-${m}`);
+    }
+  }
+  return [...months].sort().map((v) => {
+    const [y, m] = v.split('-');
+    return { label: `${y}年${parseInt(m)}月`, value: `${y}-${m.padStart(2, '0')}` };
+  });
+});
 
-// Filter options
-const yearOptions = ref<Array<{ label: string; value: string }>>([]);
-const monthOptions = ref<Array<{ label: string; value: string }>>([]);
-const marketLineOptions = ref<Array<{ label: string; value: string }>>([]);
-const productOptions = ref<Array<{ label: string; value: string }>>([]);
+function onCustomRangeChange(dates: any) {
+  if (dates && dates[0] && dates[1]) {
+    const fmt = (d: any) => {
+      if (!d) return '';
+      const y = d.year?.() ?? d.getFullYear();
+      const mo = d.month?.() ?? (d.getMonth() + 1);
+      return `${y}-${String(mo + 1).padStart(2, '0')}`;
+    };
+    periodStart.value = fmt(dates[0]);
+    periodEnd.value = fmt(dates[1]);
+  } else {
+    periodStart.value = undefined;
+    periodEnd.value = undefined;
+  }
+}
 
-// Raw period list from backend
-const allPeriods = ref<string[]>([]);
+// Update periodStart/periodEnd when selectedPeriod changes
+watch([selectedPeriod, periodDimension], () => {
+  if (!selectedPeriod.value) {
+    periodStart.value = undefined;
+    periodEnd.value = undefined;
+    return;
+  }
+  if (periodDimension.value === 'quarterly') {
+    // Convert "2026Q1" to period range
+    const match = selectedPeriod.value.match(/^(\d{4})Q(\d)$/);
+    if (match) {
+      const y = match[1];
+      const q = parseInt(match[2]);
+      periodStart.value = `${y}-${String((q - 1) * 3 + 1).padStart(2, '0')}`;
+      periodEnd.value = `${y}-${String(q * 3).padStart(2, '0')}`;
+    }
+  } else if (periodDimension.value === 'monthly') {
+    periodStart.value = selectedPeriod.value;
+    periodEnd.value = undefined;
+  } else if (periodDimension.value === 'cumulative') {
+    // Year start to selected period
+    const y = selectedPeriod.value.slice(0, 4);
+    periodStart.value = `${y}-01`;
+    periodEnd.value = selectedPeriod.value;
+  }
+});
+
+// When dimension changes, reset period selection
+watch(periodDimension, () => {
+  selectedPeriod.value = periodSelectOptions.value.length ? periodSelectOptions.value[0].value : undefined;
+});
 
 function updateSize() {
   isSmall.value = window.innerWidth < 1024;
@@ -65,64 +165,23 @@ const assistantContext = computed(() => ({
   period: period.value,
   department: selectedMarketLine.value,
   product: selectedProduct.value,
-  period_compare_type: periodCompareType.value,
+  period_dimension: periodDimension.value,
   active_section: 'overview' as string,
 }));
-
-// Year change → update month options and select latest month
-watch(selectedYear, () => {
-  const monthMap = new Map<string, string[]>();
-  for (const p of allPeriods.value) {
-    if (p.includes('-')) {
-      const [y, m] = p.split('-');
-      if (!monthMap.has(y)) monthMap.set(y, []);
-      monthMap.get(y)!.push(m);
-    }
-  }
-  const months = monthMap.get(selectedYear.value || '') || [];
-  monthOptions.value = [...new Set(months)].sort().reverse().map((v) => ({ label: v + '月', value: v }));
-  selectedMonth.value = monthOptions.value.length ? monthOptions.value[0].value : undefined;
-});
 
 async function fetchFilterOptions() {
   loading.value = true;
   try {
-    // Period options → extract years and months
     const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
     const periods = ((periodResp.data as any)?.options || []) as string[];
     allPeriods.value = periods;
 
-    // Extract unique years
-    const years = new Set<string>();
-    const monthMap = new Map<string, Set<string>>();
-    for (const p of periods) {
-      if (p.includes('-')) {
-        const [y, m] = p.split('-');
-        years.add(y);
-        if (!monthMap.has(y)) monthMap.set(y, new Set());
-        monthMap.get(y)!.add(m);
-      }
-    }
-    yearOptions.value = [...years].sort().reverse().map((v) => ({ label: v + '年', value: v }));
-
-    // Default: select latest year
-    if (yearOptions.value.length && !selectedYear.value) {
-      selectedYear.value = yearOptions.value[0].value;
+    // Default: select latest period
+    if (!selectedPeriod.value && allPeriods.value.length) {
+      selectedPeriod.value = allPeriods.value[0];
     }
 
-    // Update month options based on selected year
-    function updateMonths() {
-      const months = monthMap.get(selectedYear.value || '') || new Set<string>();
-      monthOptions.value = [...months].sort().reverse().map((v) => ({ label: v + '月', value: v }));
-    }
-    updateMonths();
-
-    // Default: select latest month
-    if (monthOptions.value.length && !selectedMonth.value) {
-      selectedMonth.value = monthOptions.value[0].value;
-    }
-
-    // Market line (department) options
+    // Market line options
     const { data: deptResp } = await getFilterOptions({ dimension: 'department' });
     const depts = ((deptResp.data as any)?.options || []) as string[];
     marketLineOptions.value = depts.map((v) => ({ label: v, value: v }));

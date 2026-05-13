@@ -42,6 +42,9 @@ class DashboardBFFRequest(BaseModel):
     filter_view_id: int | None = None
     bypass_cache: bool = False
     period: str | None = None
+    period_dimension: str | None = None  # monthly / quarterly / cumulative / custom
+    period_start: str | None = None
+    period_end: str | None = None
     period_compare_type: str | None = None  # yoy / mom / cumulative
     department: str | None = None  # filter by department/market line
     product: str | None = None  # filter by product line
@@ -68,6 +71,7 @@ class DimensionBreakdown(BaseModel):
 
 class KpiData(BaseModel):
     revenue: float = 0
+    cost: float = 0
     gross_profit: float = 0
     gross_margin: float = 0
     achievement_rate: float = 0
@@ -75,8 +79,10 @@ class KpiData(BaseModel):
     revenue_mom_growth: float = 0
     profit_mom_growth: float = 0
     # YoY (year-over-year)
+    cost_yoy_growth: float = 0
     revenue_yoy_growth: float = 0
     profit_yoy_growth: float = 0
+    gross_margin_yoy_change: float = 0
     # Cumulative YTD
     revenue_cumulative: float = 0
     profit_cumulative: float = 0
