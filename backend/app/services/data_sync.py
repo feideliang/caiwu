@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -268,6 +269,7 @@ class DataSyncService:
         """UPSERT a single row into financial_data.
 
         Returns 'inserted' or 'updated'.
+        Preserves per-row tags from DataFrame's "tags" column if present.
         """
         metric_name = str(row.get("metric_name", "")).strip()
         period = str(row.get("period", "")).strip()
@@ -277,6 +279,19 @@ class DataSyncService:
             raise ValueError("metric_name and period are required")
 
         metric_value = float(row.get("metric_value", 0.0))
+
+        # Per-row tags from DataFrame, merged with global tags
+        row_tags_raw = row.get("tags")
+        row_tags: dict = {}
+        if isinstance(row_tags_raw, dict):
+            row_tags.update(row_tags_raw)
+        elif isinstance(row_tags_raw, str):
+            try:
+                row_tags.update(json.loads(row_tags_raw))
+            except (json.JSONDecodeError, ValueError):
+                pass
+        if tags:
+            row_tags.update(tags)
 
         # Check if row already exists
         stmt = (
@@ -298,7 +313,8 @@ class DataSyncService:
             existing.metric_unit = str(row.get("metric_unit", "")) or None
             existing.batch_id = batch_id
             existing.raw_row = dict(row) if not row.empty else None
-            existing.tags = tags or existing.tags
+            if row_tags:
+                existing.tags = {**(existing.tags or {}), **row_tags}
             return "updated"
         else:
             # Insert new
@@ -309,7 +325,7 @@ class DataSyncService:
                 metric_unit=str(row.get("metric_unit", "")) or None,
                 period=period,
                 entity=entity,
-                tags=tags,
+                tags=row_tags if row_tags else None,
                 raw_row=dict(row) if not row.empty else None,
             )
             self.db.add(record)
@@ -328,13 +344,28 @@ class DataSyncService:
     def _dataframe_to_records(
         df: pd.DataFrame, batch_id: int, tags: dict | None = None
     ) -> list[dict]:
-        """Convert DataFrame rows to FinancialData insert dicts."""
+        """Convert DataFrame rows to FinancialData insert dicts.
+
+        Preserves per-row tags from DataFrame's "tags" column if present,
+        then merges the global `tags` parameter on top (per-row can override).
+        """
         records: list[dict] = []
+        has_tags_col = "tags" in df.columns
         for _, row in df.iterrows():
             metric_name = str(row.get("metric_name", "")).strip()
             period = str(row.get("period", "")).strip()
             if not metric_name or not period:
                 continue
+
+            # Per-row tags from DataFrame, then merge global tags
+            row_tags = dict(row.get("tags", {})) if has_tags_col and isinstance(row.get("tags"), (dict, str)) else {}
+            if isinstance(row_tags, str):
+                try:
+                    row_tags = json.loads(row_tags)
+                except (json.JSONDecodeError, ValueError):
+                    row_tags = {}
+            if tags:
+                row_tags.update(tags)  # global tags override baseline
 
             records.append({
                 "batch_id": batch_id,
@@ -343,7 +374,7 @@ class DataSyncService:
                 "metric_unit": str(row.get("metric_unit", "")) or None,
                 "period": period,
                 "entity": str(row.get("entity", "")) or None,
-                "tags": tags,
+                "tags": row_tags if row_tags else None,
                 "raw_row": dict(row) if not row.empty else None,
             })
         return records

@@ -63,26 +63,35 @@ async def _build_kpis(
             "(tags->>'product_line' = :prod OR tags->>'product' = :prod OR tags->>'series' = :prod)"
         ).bindparams(prod=product)
         base_filters.append(product_filter)
-        # We'll use text() queries below with this filter
 
-    trend_periods = await _periods(db, limit=24, department=department, product=product)  # need more for YoY
-    # Use explicit period if provided, otherwise auto-detect latest
-    current_period = period if period else (trend_periods[0] if trend_periods else None)
-    # If explicit period not in trend_periods list, add it
-    if period and period not in trend_periods:
+    trend_periods = await _periods(db, limit=24, department=department, product=product)
+
+    # Determine current period based on period_dimension
+    # cumulative mode: period is a year string like "2026"
+    # monthly mode: period is a month string like "2026-03"
+    if period_dimension == 'cumulative' and period and len(period) == 4:
+        current_period = period
+    else:
+        current_period = period if period else (trend_periods[0] if trend_periods else None)
+
+    # If explicit period not in trend_periods list, add it (skip for year-only periods)
+    if period and period not in trend_periods and len(period) >= 7:
         trend_periods.insert(0, period)
     previous_period = trend_periods[1] if len(trend_periods) > 1 else None
 
-    # Compute YoY period (same month last year)
+    # Compute YoY period
     yoy_period = None
     if current_period and len(current_period) >= 7:
         # Format: "2026-03" or "2026-Q1"
         year = int(current_period[:4])
         rest = current_period[5:]
         yoy_period = f"{year - 1}-{rest}"
+    elif current_period and len(current_period) == 4:
+        # Year-only: YoY is previous year
+        yoy_period = str(int(current_period) - 1)
 
     # Query all needed periods: current, previous, YoY, and all for cumulative YTD
-    query_periods = set(trend_periods[:12])  # last 12 periods
+    query_periods = set(trend_periods[:12])
     if yoy_period:
         query_periods.add(yoy_period)
     # For YTD cumulative, get all periods from year start
@@ -115,6 +124,17 @@ async def _build_kpis(
     def _sum(period: str | None, *keywords: str) -> float:
         if not period:
             return 0.0
+        # Year-only period (e.g., "2026") → sum all months in that year
+        if len(period) == 4 and period.isdigit():
+            total = 0.0
+            for p, pdata in all_metrics.items():
+                if p.startswith(f"{period}-"):
+                    for mname, val in pdata.items():
+                        for kw in keywords:
+                            if kw.lower() in mname.lower():
+                                total += val
+                                break
+            return total
         period_data = all_metrics.get(period, {})
         for mname, val in period_data.items():
             for kw in keywords:

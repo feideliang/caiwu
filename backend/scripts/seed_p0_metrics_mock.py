@@ -69,6 +69,34 @@ DEPT_TO_BU = {
 }
 REGIONS = ["华东", "华南", "华北", "西南", "海外"]
 
+# Contract types for customer segmentation
+CONTRACT_TYPES = ["直签", "代理", "经销"]
+CONTRACT_TYPE_WEIGHTS = [0.30, 0.40, 0.30]  # 30% 直签, 40% 代理, 30% 经销
+
+# Market segments (细分市场)
+MARKET_SEGMENTS = [
+    "企业网络", "无线产品", "数据中心交换机", "安全产品",
+    "云服务", "软件订阅", "智能终端", "物联网"
+]
+
+# Customer -> superior_name mapping (上级客户名称)
+CUSTOMER_SUPERIOR = {
+    "华为科技": "华为集团",
+    "阿里云": "阿里巴巴集团",
+    "腾讯": "腾讯集团",
+    "中国移动": "中国移动通信集团",
+    "字节跳动": "字节跳动集团",
+    "百度": "百度集团",
+    "京东": "京东集团",
+    "美团": "美团集团",
+}
+
+# Order categories
+ORDER_CATEGORIES = ["标准订单", "项目订单", "框架订单", "定制订单"]
+
+# Sales types
+SALES_TYPES = ["内销", "外销"]
+
 # Period -> base revenue, with MoM growth so trend-up fires
 PERIOD_BASE_REVENUE = {
     "2025-04": 5_800_000.0,
@@ -134,6 +162,10 @@ def main():
                         department = rng.choice(DEPARTMENTS)
                         region = rng.choice(REGIONS)
                         contract_no = f"CT-{period.replace('-','')}-{order_idx:04d}"
+                        contract_type = rng.choices(CONTRACT_TYPES, weights=CONTRACT_TYPE_WEIGHTS, k=1)[0]
+                        market_segment = rng.choice(MARKET_SEGMENTS)
+                        order_category = rng.choice(ORDER_CATEGORIES)
+                        sales_type = rng.choices(SALES_TYPES, weights=[0.85, 0.15], k=1)[0]
                         tags_json = json.dumps({
                             "customer": customer_name,
                             "customer_name": customer_name,
@@ -144,6 +176,11 @@ def main():
                             "department": department,
                             "bu": DEPT_TO_BU.get(department, department),
                             "region": region,
+                            "contract_type": contract_type,
+                            "market_segment": market_segment,
+                            "order_category": order_category,
+                            "sales_type": sales_type,
+                            "superior_name": CUSTOMER_SUPERIOR.get(customer_name, customer_name),
                         }, ensure_ascii=False)
                         raw_json = json.dumps(
                             {"mock_source": MOCK_TAG, "order_id": order_id},

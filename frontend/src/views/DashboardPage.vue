@@ -70,9 +70,14 @@ const selectedProduct = ref<string | undefined>();
 const allPeriods = ref<string[]>([]);
 
 // Derived period for simple month filter (monthly mode)
+// For cumulative mode, period is a year string like "2026"
 const period = computed(() => {
-  if (periodDimension.value === 'monthly' || periodDimension.value === 'cumulative') {
+  if (periodDimension.value === 'monthly') {
     return selectedPeriod.value;
+  }
+  if (periodDimension.value === 'cumulative') {
+    // Return year only for cumulative mode
+    return selectedPeriod.value ? selectedPeriod.value.slice(0, 4) : undefined;
   }
   if (periodDimension.value === 'quarterly') {
     return undefined; // handled by periodStart/periodEnd
@@ -93,7 +98,18 @@ const periodSelectOptions = computed<Array<{ label: string; value: string }>>(()
     }
     return [...quarters].sort().map((v) => ({ label: v, value: v }));
   }
-  // monthly or cumulative: month options like "2026年1月"
+  if (periodDimension.value === 'cumulative') {
+    // Year options only: "2026年" etc.
+    const years = new Set<string>();
+    for (const p of allPeriods.value) {
+      if (p.includes('-')) {
+        const y = p.split('-')[0];
+        years.add(y);
+      }
+    }
+    return [...years].sort().reverse().map((y) => ({ label: `${y}年`, value: `${y}` }));
+  }
+  // monthly: month options like "2026年1月"
   const months = new Set<string>();
   for (const p of allPeriods.value) {
     if (p.includes('-')) {
@@ -143,10 +159,10 @@ watch([selectedPeriod, periodDimension], () => {
     periodStart.value = selectedPeriod.value;
     periodEnd.value = undefined;
   } else if (periodDimension.value === 'cumulative') {
-    // Year start to selected period
+    // Full year range: selectedPeriod is "2026"
     const y = selectedPeriod.value.slice(0, 4);
     periodStart.value = `${y}-01`;
-    periodEnd.value = selectedPeriod.value;
+    periodEnd.value = `${y}-12`;
   }
 });
 
@@ -178,7 +194,13 @@ async function fetchFilterOptions() {
 
     // Default: select latest period
     if (!selectedPeriod.value && allPeriods.value.length) {
-      selectedPeriod.value = allPeriods.value[0];
+      if (periodDimension.value === 'cumulative') {
+        // Extract year from latest period
+        const latest = allPeriods.value[0];
+        selectedPeriod.value = latest.includes('-') ? latest.slice(0, 4) : latest;
+      } else {
+        selectedPeriod.value = allPeriods.value[0];
+      }
     }
 
     // Market line options

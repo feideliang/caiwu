@@ -45,17 +45,19 @@ def _extract_dimension(row: FinancialData, dimension: str) -> str | None:
     if dimension == "company":
         return "company"
     if dimension == "department":
-        return tags.get("department") or row.entity
+        return tags.get("department") or tags.get("sales_department") or row.entity
     if dimension == "customer":
-        return tags.get("customer") or tags.get("customer_name")
+        return tags.get("customer") or tags.get("customer_name") or tags.get("superior_name")
     if dimension == "product_line":
         return tags.get("product_line") or tags.get("product") or tags.get("series")
+    if dimension == "market_segment":
+        return tags.get("market_segment") or tags.get("product_family")
     if dimension == "order_id":
         return tags.get("order_id") or tags.get("contract_no")
     if dimension == "project_name":
         return tags.get("project_name")
     if dimension == "region":
-        return tags.get("region")
+        return tags.get("region") or tags.get("province")
     return None
 
 
