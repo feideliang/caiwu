@@ -1,0 +1,1 @@
+{"code":0,"message":"ok","data":{"id":25,"coefficient":0.932621,"p_value":0.0,"sample_size":15,"period_start":"2025-04","period_end":"2026-06","strength":"强","ai_explanation":"revenue 与 gross_profit 存在强正相关（系数 0.933）。该关系统计显著（p=0.0000）。建议进一步分析因果关系。","computed_at":"2026-05-12T11:12:43.939251","variable_x":"revenue","variable_y":"gross_profit"},"trace_id":""}

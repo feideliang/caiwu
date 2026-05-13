@@ -1,0 +1,43 @@
+Note: Unnecessary use of -X or --request, POST is already inferred.
+* Host localhost:8005 was resolved.
+* IPv6: ::1
+* IPv4: 127.0.0.1
+*   Trying [::1]:8005...
+*   Trying 127.0.0.1:8005...
+* Established connection to localhost (127.0.0.1 port 8005) from 127.0.0.1 port 53901 
+* using HTTP/1.x
+> POST /api/v1/ai/chat HTTP/1.1
+
+> Host: localhost:8005
+
+> User-Agent: curl/8.18.0
+
+> Accept: */*
+
+> Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzc4NTg2ODQ4LCJyb2xlIjoiYWRtaW4ifQ.Baagv4BAnbZWHMuF-WX6C4vI9efkon-bK9AOClURP9A
+
+> Content-Type: application/json
+
+> Content-Length: 97
+
+> 
+
+} [97 bytes data]
+* upload completely sent off: 97 bytes
+< HTTP/1.1 200 OK
+
+< date: Tue, 12 May 2026 11:30:22 GMT
+
+< server: uvicorn
+
+< content-length: 536
+
+< content-type: application/json
+
+< x-trace-id: 2c76537a00924720
+
+< 
+
+{ [536 bytes data]
+* Connection #0 to host localhost:8005 left intact
+{"code":0,"message":"ok","data":{"answer":"鍏充簬'test'锛屽綋鍓嶉〉闈㈡暟鎹?鏄剧ず锛氳惀涓氭敹鍏? 7,585,399.42 鍏冿紝姣涘埄鐜? 52.61%銆傚?傞渶鏇存繁鍏ュ垎鏋愶紝璇蜂娇鐢?'鎬荤粨鏈?鏈堢粡钀ユ儏鍐?'銆?'姣涘埄鐜囧彉鍖栧師鍥?'銆?'鍝?涓?閮ㄩ棬璐＄尞鏈?楂?'绛夋帹鑽愰棶棰樸??","suggestions":["鎬荤粨鏈?鏈堢粡钀ユ儏鍐?","姣涘埄鐜囧彉鍖栧師鍥?","鍝?涓?閮ㄩ棬璐＄尞鏈?楂?","鍝?涓?浜у搧绾块?庨櫓鏈?澶?"],"references":[{"type":"metric","label":"钀ヤ笟鏀跺叆","value":7585399.42},{"type":"metric","label":"姣涘埄鐜?","value":52.61}]},"trace_id":""}

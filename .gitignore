@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.env
+
+# Output
+output/
+screenshots/
+output/reports/
+
+# Data
+data/
+qdrant_data/
+*.db
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+
+# Claude
+.claude/

@@ -1,0 +1,2 @@
+strength: 强
+ai_explanation: revenue 与 gross_profit 存在强正相关（系数 0.933）。该关系统计显著（p=0.0000）。建议进一步分析因果关系。

@@ -1,0 +1,9 @@
+ID=38700: {'customer': '美团', 'customer_name': '美团', 'product_line': '数据中心交换机', 'product': '数据中心交换机', 'order_id': 'ORD-202606-0071', 'contract_no': 'CT-202606-0071', 'department': 'SBG', 'bu': '运营商BG', 'region': '华北', 'project_name': '运营商专网'}
+ID=38701: {'customer': '美团', 'customer_name': '美团', 'product_line': '数据中心交换机', 'product': '数据中心交换机', 'order_id': 'ORD-202606-0071', 'contract_no': 'CT-202606-0071', 'department': 'SBG', 'bu': '运营商BG', 'region': '华北', 'project_name': '园区WiFi升级'}
+ID=38702: {'customer': '美团', 'customer_name': '美团', 'product_line': '安全产品', 'product': '安全产品', 'order_id': 'ORD-202606-0072', 'contract_no': 'CT-202606-0072', 'department': 'TBU', 'bu': '技术BU', 'region': '华南', 'project_name': '园区WiFi升级'}
+ID=35450: {'customer': '华为科技', 'customer_name': '华为科技', 'product_line': '企业网络', 'product': '企业网络', 'order_id': 'ORD-202504-0001', 'contract_no': 'CT-202504-0001', 'department': 'CBG', 'bu': '消费者BG', 'region': '华南', 'project_name': '数智化转型一期'}
+ID=35451: {'customer': '华为科技', 'customer_name': '华为科技', 'product_line': '企业网络', 'product': '企业网络', 'order_id': 'ORD-202504-0001', 'contract_no': 'CT-202504-0001', 'department': 'CBG', 'bu': '消费者BG', 'region': '华南', 'project_name': '数据中心扩容'}
+
+Department values: ['CBG', '企业无线产品事业部', 'TBU', '海外业务部', 'SBG', '运营商事业部', 'EBG', '企业网络产品事业部', '战略和业务发展部', '服务与软件事业部']
+Product line values: ['安全产品', '运维服务', '企业网络', '无线产品', '软件订阅', '云服务', '数据中心交换机']
+Entity values: ['EBG', 'CBG', '战略合作部', '企业网络', '云桌面产品事业部本部', '供应链管理部', '云服务', 'SBG', '数据中心交换机', 'company', 'TBU', '无线产品', '品牌营销部', '智能产业中心', '商务部', 'DEFAULT', '软件订阅', '安全产品']

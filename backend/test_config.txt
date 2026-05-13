@@ -1,0 +1,4 @@
+qwen_api_key: SET
+qwen_api_key value: sk-xpMI4Oq...
+qwen_model: qwen-plus
+qwen_base_url: https://uniapi.ruijie.com.cn/v1

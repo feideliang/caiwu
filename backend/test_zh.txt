@@ -1,0 +1,2 @@
+classify_strength(0.8): 强
+_mock_explanation: revenue 与 cost 存在强正相关（系数 0.800）。该关系统计显著（p=0.0100）。建议进一步分析因果关系。
