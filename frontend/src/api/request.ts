@@ -5,6 +5,25 @@ import type { ApiResponse } from '@/types/api';
 
 let isHandling401 = false;
 
+// Dedup error popups: same URL + status within 60s → show once
+const errorPopupCache = new Map<string, number>();
+const ERROR_POPUP_COOLDOWN_MS = 60_000;
+
+function shouldShowErrorPopup(url: string, status: number): boolean {
+  const key = `${status}:${url}`;
+  const lastShown = errorPopupCache.get(key);
+  if (lastShown && Date.now() - lastShown < ERROR_POPUP_COOLDOWN_MS) {
+    return false;
+  }
+  errorPopupCache.set(key, Date.now());
+  return true;
+}
+
+function showErrorPopup(title: string, content: string, url: string, status: number) {
+  if (!shouldShowErrorPopup(url, status)) return;
+  Modal.error({ title, content });
+}
+
 const instance: AxiosInstance = axios.create({
   baseURL: window.__APP_CONFIG__?.API_BASE_URL || import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 30000,
@@ -44,16 +63,16 @@ instance.interceptors.response.use(
       }
       return Promise.reject(error);
     } else if (error.response?.status === 403) {
-      Modal.error({ title: 'No Permission', content: 'You do not have permission to access this resource.' });
+      showErrorPopup('No Permission', 'You do not have permission to access this resource.', error.config?.url || '', 403);
     } else if (error.response?.status >= 500) {
-      Modal.error({ title: 'Server Error', content: error.response?.data?.message || 'Server error, please try again later.' });
+      showErrorPopup('Server Error', error.response?.data?.message || 'Server error, please try again later.', error.config?.url || '', error.response?.status);
     } else if (error.code === 'ECONNABORTED') {
-      Modal.error({ title: 'Request Timeout', content: 'Request timed out, please check your network and try again.' });
+      showErrorPopup('Request Timeout', 'Request timed out, please check your network and try again.', error.config?.url || '', 408);
     } else if (error.response?.status === 404) {
-      Modal.error({ title: 'Not Found', content: error.response?.data?.message || 'Resource not found.' });
+      showErrorPopup('Not Found', error.response?.data?.message || 'Resource not found.', error.config?.url || '', 404);
     } else {
       const errMsg = error.response?.data?.message || error.message || 'Network error, please try again.';
-      Modal.error({ title: 'Request Failed', content: errMsg });
+      showErrorPopup('Request Failed', errMsg, error.config?.url || '', error.response?.status || 0);
     }
     return Promise.reject(error);
   },

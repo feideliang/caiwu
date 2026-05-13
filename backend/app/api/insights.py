@@ -58,7 +58,7 @@ def _serialize_insight(row: Insight) -> dict:
         "related_metric": related_metric,
         "related_chart_id": related_chart_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": getattr(row, "updated_at", None).isoformat() if getattr(row, "updated_at", None) else None,
+        "updated_at": (row.updated_at.isoformat() if hasattr(row, "updated_at") and row.updated_at else None),
     }
 
 
