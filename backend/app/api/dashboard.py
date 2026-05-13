@@ -342,10 +342,20 @@ async def dashboard_bff(
     cache_key = f"dashboard:bff:{body.dashboard_id or 'default'}:{body.device_type}:{body.period or ''}:{body.period_dimension or ''}:{body.department or ''}:{body.product or ''}"
 
     if not body.bypass_cache:
-        cached = await cache_get(cache_key)
-        if cached is not None:
-            return APIResponse.success(data=cached)
+        try:
+            cached = await cache_get(cache_key)
+            if cached is not None:
+                return APIResponse.success(data=cached)
+        except Exception:
+            pass
 
+    try:
+        return await _build_dashboard_response(body, db, cache_key)
+    except Exception:
+        raise
+
+
+async def _build_dashboard_response(body, db: AsyncSession, cache_key: str) -> APIResponse:
     # Load layout
     stmt = select(DashboardLayout).where(DashboardLayout.device_type == body.device_type)
     if body.dashboard_id:
