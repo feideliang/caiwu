@@ -67,3 +67,32 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: caiwu-celery-worker
+    env_file: .env.prod
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - ./backend:/app
+      - ./data/reports:/app/output/reports
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: caiwu-celery-beat
+    env_file: .env.prod
+    command: celery -A app.celery_app beat --loglevel=info
+    volumes:
+      - ./backend:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
