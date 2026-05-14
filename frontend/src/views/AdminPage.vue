@@ -141,7 +141,7 @@ const handleImport = async () => {
     const parsed = JSON.parse(importText.value)
     if (!Array.isArray(parsed)) throw new Error('Expected JSON array')
     const r = await importRules(parsed)
-    message.success(`已导入 ${r.data?.data?.imported_count || 0} 条规则`)
+    message.success(`已导入 ${(r.data?.data as any)?.imported_count || 0} 条规则`)
     importModal.value = false
     importText.value = ''
     await loadRules()

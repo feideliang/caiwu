@@ -65,6 +65,8 @@ const periodStart = ref<string | undefined>();
 const periodEnd = ref<string | undefined>();
 const selectedMarketLine = ref<string | undefined>();
 const selectedProduct = ref<string | undefined>();
+const marketLineOptions = ref<Array<{ label: string; value: string }>>([]);
+const productOptions = ref<Array<{ label: string; value: string }>>([]);
 
 // Raw period list from backend
 const allPeriods = ref<string[]>([]);

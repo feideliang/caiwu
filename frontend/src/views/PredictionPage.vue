@@ -185,7 +185,7 @@ function startPolling(id: number) {
       } as PredictionResult;
       return;
     }
-    if (prediction.value && (prediction.value.status === 'pending' || prediction.value.status === 'running' || prediction.value.status === 'processing')) {
+    if (prediction.value && (prediction.value.status === 'pending' || prediction.value.status === 'running')) {
       fetchPrediction(id);
     }
   }, 5000);
