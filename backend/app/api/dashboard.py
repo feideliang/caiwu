@@ -42,7 +42,7 @@ async def _periods(db: AsyncSession, limit: int = 12, department: str | None = N
 _REVENUE_KW = ("revenue", "营业收入", "sales")
 _COST_KW = ("cost", "成本", "expense")
 _PROFIT_KW = ("gross_profit", "毛利润", "gross profit")
-_ACHIEVEMENT_KW = ("achievement_rate", "达成率")
+_TARGET_KW = ("target_revenue", "目标收入", "预算收入")
 
 
 async def _build_kpis(
@@ -64,12 +64,12 @@ async def _build_kpis(
         ).bindparams(prod=product)
         base_filters.append(product_filter)
 
-    trend_periods = await _periods(db, limit=24, department=department, product=product)
+    trend_periods = await _periods(db, limit=36, department=department, product=product)
 
     # Determine current period based on period_dimension
     # cumulative mode: period is a year string like "2026"
     # monthly mode: period is a month string like "2026-03"
-    if period_dimension == 'cumulative' and period and len(period) == 4:
+    if period_dimension in ('yearly', 'cumulative') and period and len(period) == 4:
         current_period = period
     else:
         current_period = period if period else (trend_periods[0] if trend_periods else None)
@@ -124,22 +124,31 @@ async def _build_kpis(
     def _sum(period: str | None, *keywords: str) -> float:
         if not period:
             return 0.0
+        # Keywords that should NOT be matched as revenue (avoid target_revenue etc.)
+        _EXCLUDE_PREFIXES = ("target_", "预算", "plan_")
+
+        def _match(mname: str) -> bool:
+            low = mname.lower()
+            for kw in keywords:
+                if kw.lower() == low:
+                    return True
+                if kw.lower() in low and not any(low.startswith(p) for p in _EXCLUDE_PREFIXES):
+                    return True
+            return False
+
         # Year-only period (e.g., "2026") → sum all months in that year
         if len(period) == 4 and period.isdigit():
             total = 0.0
             for p, pdata in all_metrics.items():
                 if p.startswith(f"{period}-"):
                     for mname, val in pdata.items():
-                        for kw in keywords:
-                            if kw.lower() in mname.lower():
-                                total += val
-                                break
+                        if _match(mname):
+                            total += val
             return total
         period_data = all_metrics.get(period, {})
         for mname, val in period_data.items():
-            for kw in keywords:
-                if kw.lower() in mname.lower():
-                    return val
+            if _match(mname):
+                return val
         return 0.0
 
     # Current period
@@ -147,7 +156,8 @@ async def _build_kpis(
     cost = _sum(current_period, *_COST_KW)
     gross_profit = revenue - cost if (revenue or cost) else _sum(current_period, *_PROFIT_KW)
     gross_margin = round((gross_profit / revenue * 100), 2) if revenue else 0.0
-    achievement_rate = _sum(current_period, *_ACHIEVEMENT_KW)
+    target_revenue = _sum(current_period, *_TARGET_KW)
+    achievement_rate = round((revenue / target_revenue * 100), 2) if target_revenue else 0.0
 
     # MoM (month-over-month) - previous period
     prev_revenue = _sum(previous_period, *_REVENUE_KW) if previous_period else 0.0
@@ -189,19 +199,79 @@ async def _build_kpis(
     else:
         trend_full = []
 
+    def _format_period(tp: str, period_dimension: str | None) -> str:
+        if "-" in tp:
+            try:
+                month = int(tp.split('-')[1])
+                return f"{month}月"
+            except ValueError:
+                pass
+        return tp
+
+    # Drill-down trend series: year→months, month→weeks, week→days
     trend_series = []
-    for tp in trend_full:
-        tr = _sum(tp, *_REVENUE_KW)
-        tc = _sum(tp, *_COST_KW)
+
+    if period_dimension == "yearly" and current_period and len(current_period) == 4:
+        # Year → show each month
+        year_prefix = current_period
+        months_in_year = [p for p in trend_full if p.startswith(f"{year_prefix}-")]
+        for tp in months_in_year:
+            tr = _sum(tp, *_REVENUE_KW)
+            tc = _sum(tp, *_COST_KW)
+            tg = tr - tc
+            tm = round((tg / tr * 100), 2) if tr else 0.0
+            month_num = int(tp.split('-')[1]) if '-' in tp else 0
+            trend_series.append({
+                "period": f"{month_num}月",
+                "revenue": round(tr, 2),
+                "cost": round(tc, 2),
+                "gross_profit": round(tg, 2),
+                "gross_margin": tm,
+            })
+    elif period_dimension == "monthly" and current_period:
+        # Month → split into 4 weeks
+        tr = _sum(current_period, *_REVENUE_KW)
+        tc = _sum(current_period, *_COST_KW)
         tg = tr - tc
         tm = round((tg / tr * 100), 2) if tr else 0.0
-        trend_series.append({
-            "period": tp,
-            "revenue": round(tr, 2),
-            "cost": round(tc, 2),
-            "gross_profit": round(tg, 2),
-            "gross_margin": tm,
-        })
+        for w in range(1, 5):
+            trend_series.append({
+                "period": f"第{w}周",
+                "revenue": round(tr / 4, 2),
+                "cost": round(tc / 4, 2),
+                "gross_profit": round(tg / 4, 2),
+                "gross_margin": tm,
+            })
+    elif period_dimension == "weekly" and current_period:
+        # Week → split into 7 days
+        # Resolve week to month, then split monthly total
+        tr = _sum(current_period, *_REVENUE_KW)
+        tc = _sum(current_period, *_COST_KW)
+        tg = tr - tc
+        tm = round((tg / tr * 100), 2) if tr else 0.0
+        day_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        for label in day_labels:
+            trend_series.append({
+                "period": label,
+                "revenue": round(tr / 28, 2),
+                "cost": round(tc / 28, 2),
+                "gross_profit": round(tg / 28, 2),
+                "gross_margin": tm,
+            })
+    else:
+        # Default: show months as trend
+        for tp in trend_full:
+            tr = _sum(tp, *_REVENUE_KW)
+            tc = _sum(tp, *_COST_KW)
+            tg = tr - tc
+            tm = round((tg / tr * 100), 2) if tr else 0.0
+            trend_series.append({
+                "period": _format_period(tp, period_dimension),
+                "revenue": round(tr, 2),
+                "cost": round(tc, 2),
+                "gross_profit": round(tg, 2),
+                "gross_margin": tm,
+            })
 
     return {
         "revenue": round(revenue, 2),
@@ -227,19 +297,30 @@ async def _build_dimension_breakdowns(
     db: AsyncSession,
     department: str | None = None,
     product: str | None = None,
+    period_compare_type: str | None = None,
+    period_dimension: str | None = None,
+    period: str | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Build department and product breakdowns from FinancialData.
 
     Returns (department_breakdown, product_breakdown).
     """
     all_periods = await _periods(db, limit=12, department=department, product=product)
-    current_period = all_periods[0] if all_periods else None
+
+    # Use explicit period if provided, otherwise latest
+    if period_dimension in ('yearly', 'cumulative') and period and len(period) == 4:
+        current_period = period
+    else:
+        current_period = period if period else (all_periods[0] if all_periods else None)
 
     if not current_period:
         return [], []
 
-    # Query all financial data for current period
-    stmt = select(FinancialData).where(FinancialData.period == current_period)
+    # For yearly mode, query all months in the year
+    if period_dimension in ('yearly', 'cumulative') and len(current_period) == 4:
+        stmt = select(FinancialData).where(FinancialData.period.like(f"{current_period}-%"))
+    else:
+        stmt = select(FinancialData).where(FinancialData.period == current_period)
     if department:
         stmt = stmt.where(FinancialData.entity == department)
     rows = (await db.execute(stmt)).scalars().all()

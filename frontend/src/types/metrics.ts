@@ -59,9 +59,12 @@ export interface BreakdownItem {
   tax_excluded_cost?: number;
   gross_profit?: number;
   gross_margin?: number;
+  revenue_contribution?: number;
   gross_margin_contribution?: number;
   order_count?: number;
   avg_order_value?: number;
+  neg_margin_order_count?: number;
+  neg_margin_amount?: number;
   revenue_yoy_growth?: number;
   calculable?: boolean;
   missing_fields?: string[];

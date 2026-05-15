@@ -19,7 +19,10 @@ async def get_core_metrics(
     dimension: str = Query("company"),
     entity: str | None = Query(None),
     compare: str = Query("all"),
+    period_dimension: str = Query("monthly"),
     high_margin_threshold: float = Query(40.0),
+    product: str | None = Query(None),
+    department: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
@@ -29,6 +32,9 @@ async def get_core_metrics(
         dimension=dimension,
         entity=entity,
         compare=compare,
+        period_dimension=period_dimension,
         high_margin_threshold=high_margin_threshold,
+        product=product,
+        department=department,
     )
     return APIResponse.success(data=result.model_dump())

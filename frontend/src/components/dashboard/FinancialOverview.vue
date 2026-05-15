@@ -65,7 +65,6 @@ import InsightCard from './InsightCard.vue';
 import CoreMetricsPanel from './CoreMetricsPanel.vue';
 import AIChartRecommender from '@/components/ai/AIChartRecommender.vue';
 import { useInsightsStore } from '@/store/insights';
-import { useAuthStore } from '@/store/auth';
 import { queryDashboard, type DashboardBff } from '@/api/dashboard';
 import { toWan } from '@/utils/format';
 
@@ -89,12 +88,10 @@ interface KpiCardItem {
   icon: Component;
 }
 
-const insightsStore = useInsightsStore();
-const authStore = useAuthStore();
-
 const loading = ref(false);
 const appliedChartType = ref('line');
 const dashboardData = ref<DashboardBff | null>(null);
+const insightsStore = useInsightsStore();
 
 const kpiCards = computed<KpiCardItem[]>(() => {
   const kpis = dashboardData.value?.kpis;
@@ -154,7 +151,6 @@ async function fetchData() {
 watch(() => [props.period, props.periodDimension, props.periodStart, props.periodEnd, props.department, props.product], fetchData);
 
 onMounted(async () => {
-  if (!authStore.isLoggedIn) return;
   await Promise.all([
     fetchData(),
     insightsStore.fetchInsights(),

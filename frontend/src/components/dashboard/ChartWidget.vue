@@ -17,6 +17,7 @@
       renderer="canvas"
       autoresize
       :style="{ height: chartHeight }"
+      @click="onChartClick"
     />
     <a-empty v-else-if="!loading && !chartOption" description="暂无数据" />
   </a-card>
@@ -48,10 +49,17 @@ const props = withDefaults(defineProps<{
   showExtra: false,
 });
 
-defineEmits<{
+const emit = defineEmits<{
   refresh: [];
   drilldown: [];
+  'chart-click': [value: string];
 }>();
+
+function onChartClick(params: { name?: string }) {
+  if (params.name) {
+    emit('chart-click', params.name);
+  }
+}
 
 const isMobile = ref(window.innerWidth < 768);
 const isTablet = ref(window.innerWidth >= 768 && window.innerWidth < 1024);
@@ -89,6 +97,39 @@ const chartOption = computed(() => {
   const valueKeys = Object.keys(props.data[0]).filter((k) => k !== xKey);
 
   switch (props.chartType) {
+  case 'bar-line': {
+    const hasMargin = valueKeys.includes('gross_margin') || valueKeys.includes('毛利率');
+    const marginKey = valueKeys.find((k) => k === 'gross_margin' || k === '毛利率') || '';
+    const mainKeys = valueKeys.filter((k) => k !== marginKey);
+    const nameKey = Object.keys(props.data[0])[0] || 'name';
+
+    return {
+      tooltip: { trigger: 'axis' as const },
+      legend: { bottom: 0, type: 'scroll' as const },
+      grid: { top: 30, bottom: isMobile.value ? 50 : 40, left: isMobile.value ? 40 : 60, right: hasMargin ? 60 : 20 },
+      xAxis: { type: 'category' as const, data: props.data.map((d) => d[nameKey]), axisLabel: { rotate: isMobile.value ? 45 : 0 } },
+      yAxis: [
+        { type: 'value' as const, name: '万元', position: 'left' as const },
+        ...(hasMargin ? [{ type: 'value' as const, name: '%', position: 'right' as const }] : []),
+      ],
+      series: [
+        ...mainKeys.map((key) => ({
+          name: key,
+          type: 'bar' as const,
+          yAxisIndex: 0,
+          data: props.data.map((d) => Math.round(Number(d[key]) / 10000 * 100) / 100),
+        })),
+        ...(hasMargin ? [{
+          name: marginKey || '毛利率',
+          type: 'line' as const,
+          yAxisIndex: 1,
+          data: props.data.map((d) => d[marginKey]),
+          smooth: true,
+          lineStyle: { type: 'dashed' as const },
+        }] : []),
+      ],
+    };
+  }
   case 'line': {
     // Chinese legend mapping
     const legendMap: Record<string, string> = {
@@ -202,6 +243,22 @@ const chartOption = computed(() => {
         yAxis: { type: 'value' as const },
         series: valueKeys.map((key) => ({ name: key, type: 'bar', data: props.data.map((d) => d[key]) })),
       };
+    case 'grouped-bar': {
+      const colorMap: Record<string, string> = { 营业收入: '#1890ff', 毛利额: '#52c41a' };
+      return {
+        tooltip: { trigger: 'axis' as const },
+        legend: { bottom: 0, type: 'scroll' as const },
+        grid: { top: 30, bottom: isMobile.value ? 50 : 40, left: isMobile.value ? 100 : 140, right: 40 },
+        xAxis: { type: 'value' as const, name: '万元' },
+        yAxis: { type: 'category' as const, data: props.data.map((d) => d[xKey]).reverse(), axisLabel: { fontSize: 11 } },
+        series: valueKeys.map((key) => ({
+          name: key,
+          type: 'bar' as const,
+          data: props.data.map((d) => +Math.round(Number(d[key]) / 10000 * 100) / 100).reverse(),
+          itemStyle: { color: colorMap[key] || '#1890ff' },
+        })),
+      };
+    }
     case 'pie': {
       const pieData = props.data.map((d) => ({ name: String(d[xKey]), value: d[valueKeys[0]] as number }));
       return {

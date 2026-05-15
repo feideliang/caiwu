@@ -95,16 +95,10 @@ async def get_filter_options(
                     if val:
                         values.add(str(val))
 
-            # For department, also include entity column values (matches _extract_dimension fallback)
+            # For department, use tags->>'department' only (entity column contains garbled product names)
+            # _extract_dimension falls back to entity, but filter options should be clean
             if dimension == "department":
-                entity_sql = text(
-                    "SELECT DISTINCT entity FROM financial_data "
-                    "WHERE entity IS NOT NULL"
-                )
-                entity_result = await db.execute(entity_sql)
-                for row in entity_result:
-                    if row[0]:
-                        values.add(str(row[0]))
+                pass  # already collected from tags above
 
             options = sorted(values)
             if prefix:

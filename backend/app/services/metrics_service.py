@@ -45,11 +45,13 @@ def _extract_dimension(row: FinancialData, dimension: str) -> str | None:
     if dimension == "company":
         return "company"
     if dimension == "department":
-        return tags.get("department") or tags.get("sales_department") or row.entity
+        return tags.get("department") or tags.get("sales_department") or tags.get("hr_department") or row.entity
     if dimension == "customer":
         return tags.get("customer") or tags.get("customer_name") or tags.get("superior_name")
     if dimension == "product_line":
         return tags.get("product_line") or tags.get("product") or tags.get("series")
+    if dimension == "sales_product":
+        return tags.get("sales_product_name") or tags.get("product") or tags.get("series")
     if dimension == "market_segment":
         return tags.get("market_segment") or tags.get("product_family")
     if dimension == "order_id":
@@ -62,7 +64,12 @@ def _extract_dimension(row: FinancialData, dimension: str) -> str | None:
 
 
 def _yoy_period(period: str) -> str | None:
-    if not period or len(period) < 7:
+    if not period:
+        return None
+    # Year-only period (e.g. "2026") → previous year
+    if len(period) == 4 and period.isdigit():
+        return f"{int(period) - 1}"
+    if len(period) < 7:
         return None
     try:
         year = int(period[:4])
@@ -81,6 +88,31 @@ def _round(value: float | None, ndigits: int = 2) -> float | None:
     if value is None:
         return None
     return round(value, ndigits)
+
+
+def _format_period_label(period: str, period_dimension: str) -> str:
+    """Format period label based on dimension for chart x-axis display."""
+    if period_dimension == "yearly":
+        # Show year only
+        return period[:4] if "-" in period else period
+    if period_dimension == "weekly":
+        # Show as week number: "2026-03" → "W10" (approximate)
+        if "-" in period:
+            try:
+                year, month = period.split("-")
+                m = int(month)
+                week_num = (m - 1) * 4 + 1
+                return f"{year}-W{week_num}"
+            except (ValueError, IndexError):
+                pass
+    # monthly: "2026-01" → "01月"
+    if "-" in period:
+        try:
+            month = period.split("-")[1]
+            return f"{int(month)}月"
+        except (ValueError, IndexError):
+            pass
+    return period
 
 
 class MetricsService:
@@ -103,9 +135,19 @@ class MetricsService:
         dimension: str = "company",
         entity: str | None = None,
         compare: str = "all",
+        period_dimension: str = "monthly",
         high_margin_threshold: float = 40.0,
+        product: str | None = None,
+        department: str | None = None,
     ) -> CoreMetricsResponse:
-        all_periods = await MetricsService._list_periods(db, limit=24)
+        all_periods = await MetricsService._list_periods(db, limit=36)
+        raw_period = period
+
+        # Handle yearly mode: aggregate all months in the year
+        is_yearly = period_dimension == "yearly" and period and len(period) == 4 and period.isdigit()
+        # Handle weekly mode: use individual months as proxy for weeks
+        is_weekly = period_dimension == "weekly"
+
         current_period = period or (all_periods[0] if all_periods else None)
 
         warnings: list[str] = []
@@ -126,13 +168,24 @@ class MetricsService:
             )
 
         sorted_periods = sorted(all_periods)
-        if current_period in sorted_periods:
+        if is_yearly and raw_period:
+            # For yearly: use all months in the year as trend
+            trend_periods = [p for p in sorted_periods if p.startswith(f"{raw_period}-")]
+        elif is_weekly and raw_period:
+            # For weekly: use recent months, treat each as a "week period"
+            idx = sorted_periods.index(raw_period) if raw_period in sorted_periods else len(sorted_periods) - 1
+            trend_periods = sorted_periods[max(0, idx - 5):idx + 1]
+        elif current_period in sorted_periods:
             idx = sorted_periods.index(current_period)
             trend_periods = sorted_periods[max(0, idx - 5):idx + 1]
         else:
             trend_periods = sorted_periods[-6:]
 
         yoy_curr = _yoy_period(current_period)
+        # For yearly YoY, use previous year
+        if is_yearly and raw_period:
+            yoy_curr = str(int(raw_period) - 1)
+
         query_periods = set(trend_periods) | {current_period}
         for tp in trend_periods:
             yp = _yoy_period(tp)
@@ -151,6 +204,10 @@ class MetricsService:
         period_bucket: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         # period -> dimension_value -> bucket -> sum
         period_dim_bucket: dict[str, dict[str, dict[str, float]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(float))
+        )
+        # period -> department -> bucket -> sum (always tracked for market line)
+        period_dept_bucket: dict[str, dict[str, dict[str, float]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(float))
         )
         # period -> customer -> revenue
@@ -174,6 +231,17 @@ class MetricsService:
         direct_sign_gp: float = 0.0
 
         for row in rows:
+            tags = row.tags or {}
+            # Apply cross-dimension filters
+            if product:
+                row_product = tags.get("product_line") or tags.get("product") or tags.get("series")
+                if row_product != product:
+                    continue
+            if department:
+                row_dept = tags.get("department") or tags.get("sales_department") or row.entity
+                if row_dept != department:
+                    continue
+
             bucket = _bucket(row.metric_name)
             if bucket is None:
                 continue
@@ -185,6 +253,11 @@ class MetricsService:
             if dim_value is not None:
                 period_dim_bucket[p][dim_value][bucket] += v
 
+            # Always track department dimension for market line computation
+            dept_value = _extract_dimension(row, "department")
+            if dept_value is not None:
+                period_dept_bucket[p][dept_value][bucket] += v
+
             tags = row.tags or {}
             customer = tags.get("customer") or tags.get("customer_name")
             if customer:
@@ -194,11 +267,11 @@ class MetricsService:
                 if bucket:
                     period_customer_bucket[p][customer][bucket] += v
 
-            product = tags.get("product_line") or tags.get("product") or tags.get("series")
-            if product and bucket in ("gross_profit", "revenue", "cost"):
-                period_product_bucket[p][product][bucket] += v
+            row_product = tags.get("product_line") or tags.get("product") or tags.get("series")
+            if row_product and bucket in ("gross_profit", "revenue", "cost"):
+                period_product_bucket[p][row_product][bucket] += v
                 if bucket == "gross_profit":
-                    period_product_gp[p][product] += v
+                    period_product_gp[p][row_product] += v
 
             order_id = tags.get("order_id") or tags.get("contract_no")
             if order_id:
@@ -206,11 +279,58 @@ class MetricsService:
 
             # Direct sign customer: tags.contract_type == "直签"
             contract_type = tags.get("contract_type")
-            if contract_type == "直签" and p == current_period:
-                if bucket == "revenue":
-                    direct_sign_rev += v
-                elif bucket == "gross_profit":
-                    direct_sign_gp += v
+            if contract_type == "直签":
+                match_period = (p.startswith(raw_period + "-") if is_yearly and raw_period else p == current_period)
+                if match_period:
+                    if bucket == "revenue":
+                        direct_sign_rev += v
+                    elif bucket == "gross_profit":
+                        direct_sign_gp += v
+
+        # For yearly mode: aggregate all months in the target year into a synthetic year key
+        if is_yearly and raw_period:
+            # Also aggregate YoY comparison year if applicable
+            yoy_year = yoy_curr if yoy_curr and len(yoy_curr) == 4 and yoy_curr.isdigit() else None
+            for agg_year in [raw_period, yoy_year]:
+                if not agg_year:
+                    continue
+                for p in list(period_bucket.keys()):
+                    if p.startswith(f"{agg_year}-"):
+                        for bucket_name, val in period_bucket[p].items():
+                            period_bucket[agg_year][bucket_name] += val
+                for p in list(period_dim_bucket.keys()):
+                    if p.startswith(f"{agg_year}-"):
+                        for dim_val, bk in period_dim_bucket[p].items():
+                            for bucket_name, val in bk.items():
+                                period_dim_bucket[agg_year][dim_val][bucket_name] += val
+                for p in list(period_customer_rev.keys()):
+                    if p.startswith(f"{agg_year}-"):
+                        for cust, val in period_customer_rev[p].items():
+                            period_customer_rev[agg_year][cust] += val
+                for p in list(period_product_gp.keys()):
+                    if p.startswith(f"{agg_year}-"):
+                        for prod, val in period_product_gp[p].items():
+                            period_product_gp[agg_year][prod] += val
+                for p in list(period_product_bucket.keys()):
+                    if p.startswith(f"{agg_year}-"):
+                        for prod, bk in period_product_bucket[p].items():
+                            for bucket_name, val in bk.items():
+                                period_product_bucket[agg_year][prod][bucket_name] += val
+                for p in list(period_order.keys()):
+                    if p.startswith(f"{agg_year}-"):
+                        for oid, bk in period_order[p].items():
+                            for bucket_name, val in bk.items():
+                                period_order[agg_year][oid][bucket_name] += val
+                for p in list(period_customer_bucket.keys()):
+                    if p.startswith(f"{agg_year}-"):
+                        for cust, bk in period_customer_bucket[p].items():
+                            for bucket_name, val in bk.items():
+                                period_customer_bucket[agg_year][cust][bucket_name] += val
+                for p in list(period_dept_bucket.keys()):
+                    if p.startswith(f"{agg_year}-"):
+                        for dept, bk in period_dept_bucket[p].items():
+                            for bucket_name, val in bk.items():
+                                period_dept_bucket[agg_year][dept][bucket_name] += val
 
         def _bucket_values(p: str) -> tuple[float | None, float | None, float | None]:
             buckets = period_bucket.get(p, {})
@@ -230,9 +350,11 @@ class MetricsService:
         rev_yoy = (_safe_div(rev - yoy_rev, yoy_rev) * 100) if (rev is not None and yoy_rev) else None
         gp_yoy = (_safe_div(gp - yoy_gp, yoy_gp) * 100) if (gp is not None and yoy_gp) else None
 
-        # MoM
+        # MoM / comparison base period
         prev_period = trend_periods[-2] if len(trend_periods) >= 2 and trend_periods[-1] == current_period else None
-        prev_rev, prev_cost, prev_gp = _bucket_values(prev_period) if prev_period else (None, None, None)
+        # For yearly mode, use YoY year as comparison base for margin_change_analysis
+        compare_period = prev_period or (yoy_curr if is_yearly else None)
+        prev_rev, prev_cost, prev_gp = _bucket_values(compare_period) if compare_period else (None, None, None)
         rev_mom = (_safe_div(rev - prev_rev, prev_rev) * 100) if (rev is not None and prev_rev) else None
         gp_mom = (_safe_div(gp - prev_gp, prev_gp) * 100) if (gp is not None and prev_gp) else None
 
@@ -328,14 +450,14 @@ class MetricsService:
         if target_rev and rev:
             summary.achievement_rate = round(rev / target_rev * 100, 2)
 
-        # Core market line (top revenue department/product_line)
-        if dim_buckets := period_dim_bucket.get(current_period, {}):
-            top_dim = max(dim_buckets.items(), key=lambda x: x[1].get("revenue", 0))
+        # Core market line (top revenue department — always use dept dimension)
+        if dept_buckets := period_dept_bucket.get(current_period, {}):
+            top_dim = max(dept_buckets.items(), key=lambda x: x[1].get("revenue", 0))
             summary.core_market_line = str(top_dim[0])
             summary.core_market_line_revenue = _round(top_dim[1].get("revenue", 0))
-            # Highest value market line (top gross_profit)
+            # Highest value market line (top gross_profit department)
             top_gp_dim = max(
-                dim_buckets.items(),
+                dept_buckets.items(),
                 key=lambda x: (
                     x[1].get("gross_profit")
                     if x[1].get("gross_profit") is not None
@@ -388,7 +510,8 @@ class MetricsService:
         # Map order_id -> dimension_value, then count per dim
         period_orders_dim: dict[str, set[str]] = defaultdict(set)
         for row in rows:
-            if row.period != current_period:
+            match = (row.period == current_period) or (is_yearly and row.period.startswith(f"{current_period}-"))
+            if not match:
                 continue
             tags = row.tags or {}
             order_id = tags.get("order_id") or tags.get("contract_no")
@@ -400,6 +523,9 @@ class MetricsService:
         breakdowns: list[BreakdownItem] = []
         if dimension != "company":
             dim_buckets = period_dim_bucket.get(current_period, {})
+            total_rev_for_contrib = sum(
+                (b.get("revenue", 0) or 0) for b in dim_buckets.values()
+            )
             total_gp_for_contrib = sum(
                 (
                     b.get("gross_profit")
@@ -416,6 +542,7 @@ class MetricsService:
                     d_gp = d_rev - d_cost
                 d_gm = (d_gp / d_rev * 100) if (d_gp is not None and d_rev) else None
                 contrib = (d_gp / total_gp_for_contrib * 100) if (d_gp is not None and total_gp_for_contrib) else None
+                rev_contrib = (d_rev / total_rev_for_contrib * 100) if (d_rev is not None and total_rev_for_contrib) else None
                 d_missing: list[str] = []
                 if d_rev is None:
                     d_missing.append("revenue")
@@ -424,6 +551,18 @@ class MetricsService:
 
                 # Order count per dimension
                 d_order_count = len(period_orders_dim.get(str(dim_value), set()))
+
+                # Neg margin orders per dimension
+                d_neg_orders = 0
+                d_neg_amount = 0.0
+                for oid in period_orders_dim.get(str(dim_value), set()):
+                    o_bk = orders.get(oid, {})
+                    o_gp = o_bk.get("gross_profit")
+                    if o_gp is None:
+                        o_gp = (o_bk.get("revenue", 0) or 0) - (o_bk.get("cost", 0) or 0)
+                    if o_gp < 0:
+                        d_neg_orders += 1
+                        d_neg_amount += o_gp
 
                 # Avg order value (万元)
                 d_aov = (d_rev / d_order_count) if (d_rev is not None and d_order_count > 0) else None
@@ -442,9 +581,12 @@ class MetricsService:
                     tax_excluded_cost=_round(d_cost),
                     gross_profit=_round(d_gp),
                     gross_margin=_round(d_gm),
+                    revenue_contribution=_round(rev_contrib),
                     gross_margin_contribution=_round(contrib),
                     order_count=d_order_count if d_order_count else None,
                     avg_order_value=_round(d_aov),
+                    neg_margin_order_count=d_neg_orders,
+                    neg_margin_amount=_round(abs(d_neg_amount)) if d_neg_amount else 0,
                     revenue_yoy_growth=_round(d_yoy_rev),
                     calculable=(d_rev is not None and d_gp is not None),
                     missing_fields=d_missing,
@@ -452,57 +594,195 @@ class MetricsService:
             breakdowns.sort(key=lambda b: (b.revenue or 0), reverse=True)
 
         # ── Trend series ─────────────────────────────────────
+        # Drill-down pattern: year→months, month→weeks, week→days
         trend: list[TrendDataPoint] = []
-        for i, tp in enumerate(trend_periods):
-            t_rev, t_cost, t_gp = _bucket_values(tp)
+
+        if period_dimension == "yearly" and is_yearly:
+            # Year → show each month as a trend point
+            for i, tp in enumerate(trend_periods):
+                t_rev, t_cost, t_gp = _bucket_values(tp)
+                t_gm = (t_gp / t_rev * 100) if (t_gp is not None and t_rev) else None
+
+                tp_prev = trend_periods[i - 1] if i > 0 else None
+                if tp_prev:
+                    p_rev, _, p_gp = _bucket_values(tp_prev)
+                else:
+                    p_rev, p_gp = None, None
+                t_rev_mom = (_safe_div(t_rev - p_rev, p_rev) * 100) if (t_rev is not None and p_rev) else None
+                t_gp_mom = (_safe_div(t_gp - p_gp, p_gp) * 100) if (t_gp is not None and p_gp) else None
+
+                tp_yoy = _yoy_period(tp)
+                y_rev, _, y_gp = _bucket_values(tp_yoy) if tp_yoy else (None, None, None)
+                t_rev_yoy = (_safe_div(t_rev - y_rev, y_rev) * 100) if (t_rev is not None and y_rev) else None
+                t_gp_yoy = (_safe_div(t_gp - y_gp, y_gp) * 100) if (t_gp is not None and y_gp) else None
+
+                month_num = int(tp.split("-")[1]) if "-" in tp else i + 1
+                trend.append(TrendDataPoint(
+                    period=f"{month_num}月",
+                    revenue=_round(t_rev),
+                    tax_excluded_cost=_round(t_cost),
+                    gross_profit=_round(t_gp),
+                    gross_margin=_round(t_gm),
+                    revenue_mom_growth=_round(t_rev_mom),
+                    revenue_yoy_growth=_round(t_rev_yoy),
+                    gross_profit_mom_growth=_round(t_gp_mom),
+                    gross_profit_yoy_growth=_round(t_gp_yoy),
+                ))
+
+        elif period_dimension == "monthly":
+            # Month → split into 4 weeks (approximate from monthly total)
+            t_rev, t_cost, t_gp = _bucket_values(current_period)
             t_gm = (t_gp / t_rev * 100) if (t_gp is not None and t_rev) else None
+            for w in range(1, 5):
+                w_rev = _round(t_rev / 4) if t_rev else None
+                w_cost = _round(t_cost / 4) if t_cost else None
+                w_gp = _round(t_gp / 4) if t_gp else None
+                w_gm = _round(t_gm) if t_gm else None  # margin stays the same
+                w_rev_mom = None  # no prior week data
+                trend.append(TrendDataPoint(
+                    period=f"第{w}周",
+                    revenue=w_rev,
+                    tax_excluded_cost=w_cost,
+                    gross_profit=w_gp,
+                    gross_margin=w_gm,
+                    revenue_mom_growth=w_rev_mom,
+                    revenue_yoy_growth=w_rev_mom,
+                    gross_profit_mom_growth=w_rev_mom,
+                    gross_profit_yoy_growth=w_rev_mom,
+                ))
 
-            tp_prev = trend_periods[i - 1] if i > 0 else None
-            if tp_prev:
-                p_rev, _, p_gp = _bucket_values(tp_prev)
-            else:
-                p_rev, p_gp = None, None
-            t_rev_mom = (_safe_div(t_rev - p_rev, p_rev) * 100) if (t_rev is not None and p_rev) else None
-            t_gp_mom = (_safe_div(t_gp - p_gp, p_gp) * 100) if (t_gp is not None and p_gp) else None
+        elif period_dimension == "weekly":
+            # Week → split into 7 days (approximate from monthly total / 4)
+            t_rev, t_cost, t_gp = _bucket_values(current_period)
+            t_gm = (t_gp / t_rev * 100) if (t_gp is not None and t_rev) else None
+            day_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+            for d, label in enumerate(day_labels):
+                d_rev = _round(t_rev / 28) if t_rev else None  # monthly total / 4 weeks / 7 days
+                d_cost = _round(t_cost / 28) if t_cost else None
+                d_gp = _round(t_gp / 28) if t_gp else None
+                d_gm = _round(t_gm) if t_gm else None
+                trend.append(TrendDataPoint(
+                    period=label,
+                    revenue=d_rev,
+                    tax_excluded_cost=d_cost,
+                    gross_profit=d_gp,
+                    gross_margin=d_gm,
+                    revenue_mom_growth=None,
+                    revenue_yoy_growth=None,
+                    gross_profit_mom_growth=None,
+                    gross_profit_yoy_growth=None,
+                ))
 
-            tp_yoy = _yoy_period(tp)
-            y_rev, _, y_gp = _bucket_values(tp_yoy) if tp_yoy else (None, None, None)
-            t_rev_yoy = (_safe_div(t_rev - y_rev, y_rev) * 100) if (t_rev is not None and y_rev) else None
-            t_gp_yoy = (_safe_div(t_gp - y_gp, y_gp) * 100) if (t_gp is not None and y_gp) else None
+        else:
+            # Default: monthly trend (recent 6 periods)
+            for i, tp in enumerate(trend_periods):
+                t_rev, t_cost, t_gp = _bucket_values(tp)
+                t_gm = (t_gp / t_rev * 100) if (t_gp is not None and t_rev) else None
 
-            trend.append(TrendDataPoint(
-                period=tp,
-                revenue=_round(t_rev),
-                tax_excluded_cost=_round(t_cost),
-                gross_profit=_round(t_gp),
-                gross_margin=_round(t_gm),
-                revenue_mom_growth=_round(t_rev_mom),
-                revenue_yoy_growth=_round(t_rev_yoy),
-                gross_profit_mom_growth=_round(t_gp_mom),
-                gross_profit_yoy_growth=_round(t_gp_yoy),
-            ))
+                tp_prev = trend_periods[i - 1] if i > 0 else None
+                if tp_prev:
+                    p_rev, _, p_gp = _bucket_values(tp_prev)
+                else:
+                    p_rev, p_gp = None, None
+                t_rev_mom = (_safe_div(t_rev - p_rev, p_rev) * 100) if (t_rev is not None and p_rev) else None
+                t_gp_mom = (_safe_div(t_gp - p_gp, p_gp) * 100) if (t_gp is not None and p_gp) else None
+
+                tp_yoy = _yoy_period(tp)
+                y_rev, _, y_gp = _bucket_values(tp_yoy) if tp_yoy else (None, None, None)
+                t_rev_yoy = (_safe_div(t_rev - y_rev, y_rev) * 100) if (t_rev is not None and y_rev) else None
+                t_gp_yoy = (_safe_div(t_gp - y_gp, y_gp) * 100) if (t_gp is not None and y_gp) else None
+
+                trend.append(TrendDataPoint(
+                    period=_format_period_label(tp, period_dimension),
+                    revenue=_round(t_rev),
+                    tax_excluded_cost=_round(t_cost),
+                    gross_profit=_round(t_gp),
+                    gross_margin=_round(t_gm),
+                    revenue_mom_growth=_round(t_rev_mom),
+                    revenue_yoy_growth=_round(t_rev_yoy),
+                    gross_profit_mom_growth=_round(t_gp_mom),
+                    gross_profit_yoy_growth=_round(t_gp_yoy),
+                ))
 
         calculable = rev is not None and gp is not None
 
         # ── Dimension trend series (for stacked area charts) ──
         dim_trend: list = []
         if dimension != "company":
-            for tp in trend_periods:
-                dim_bk = period_dim_bucket.get(tp, {})
-                for dim_value, bk in dim_bk.items():
-                    t_rev = bk.get("revenue")
-                    t_gp = bk.get("gross_profit")
-                    t_cost = bk.get("cost")
-                    if t_gp is None and t_rev is not None and t_cost is not None:
-                        t_gp = t_rev - t_cost
-                    t_gm = (t_gp / t_rev * 100) if (t_gp is not None and t_rev) else None
-                    dim_trend.append({
-                        "period": tp,
-                        "dimension_value": str(dim_value),
-                        "revenue": _round(t_rev),
-                        "gross_profit": _round(t_gp),
-                        "gross_margin": _round(t_gm),
-                    })
+            if period_dimension == "yearly" and is_yearly:
+                # Year → months, per dimension
+                for tp in trend_periods:
+                    month_num = int(tp.split("-")[1]) if "-" in tp else 0
+                    dim_bk = period_dim_bucket.get(tp, {})
+                    for dim_value, bk in dim_bk.items():
+                        t_rev = bk.get("revenue")
+                        t_gp = bk.get("gross_profit")
+                        t_cost = bk.get("cost")
+                        if t_gp is None and t_rev is not None and t_cost is not None:
+                            t_gp = t_rev - t_cost
+                        t_gm = (t_gp / t_rev * 100) if (t_gp is not None and t_rev) else None
+                        dim_trend.append({
+                            "period": f"{month_num}月",
+                            "dimension_value": str(dim_value),
+                            "revenue": _round(t_rev),
+                            "gross_profit": _round(t_gp),
+                            "gross_margin": _round(t_gm),
+                        })
+            elif period_dimension == "monthly":
+                # Month → 4 weeks, per dimension
+                dim_bk = period_dim_bucket.get(current_period, {})
+                for w in range(1, 5):
+                    for dim_value, bk in dim_bk.items():
+                        t_rev = bk.get("revenue")
+                        t_gp = bk.get("gross_profit")
+                        t_cost = bk.get("cost")
+                        if t_gp is None and t_rev is not None and t_cost is not None:
+                            t_gp = t_rev - t_cost
+                        t_gm = (t_gp / t_rev * 100) if (t_gp is not None and t_rev) else None
+                        dim_trend.append({
+                            "period": f"第{w}周",
+                            "dimension_value": str(dim_value),
+                            "revenue": _round(t_rev / 4) if t_rev else None,
+                            "gross_profit": _round(t_gp / 4) if t_gp else None,
+                            "gross_margin": _round(t_gm),
+                        })
+            elif period_dimension == "weekly":
+                # Week → 7 days, per dimension
+                dim_bk = period_dim_bucket.get(current_period, {})
+                day_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+                for label in day_labels:
+                    for dim_value, bk in dim_bk.items():
+                        t_rev = bk.get("revenue")
+                        t_gp = bk.get("gross_profit")
+                        t_cost = bk.get("cost")
+                        if t_gp is None and t_rev is not None and t_cost is not None:
+                            t_gp = t_rev - t_cost
+                        t_gm = (t_gp / t_rev * 100) if (t_gp is not None and t_rev) else None
+                        dim_trend.append({
+                            "period": label,
+                            "dimension_value": str(dim_value),
+                            "revenue": _round(t_rev / 28) if t_rev else None,
+                            "gross_profit": _round(t_gp / 28) if t_gp else None,
+                            "gross_margin": _round(t_gm),
+                        })
+            else:
+                # Default: monthly trend periods
+                for tp in trend_periods:
+                    dim_bk = period_dim_bucket.get(tp, {})
+                    for dim_value, bk in dim_bk.items():
+                        t_rev = bk.get("revenue")
+                        t_gp = bk.get("gross_profit")
+                        t_cost = bk.get("cost")
+                        if t_gp is None and t_rev is not None and t_cost is not None:
+                            t_gp = t_rev - t_cost
+                        t_gm = (t_gp / t_rev * 100) if (t_gp is not None and t_rev) else None
+                        dim_trend.append({
+                            "period": _format_period_label(tp, period_dimension),
+                            "dimension_value": str(dim_value),
+                            "revenue": _round(t_rev),
+                            "gross_profit": _round(t_gp),
+                            "gross_margin": _round(t_gm),
+                        })
         # Consecutive growth periods (count backwards from current period)
         rev_consec = 0
         gp_consec = 0
@@ -530,9 +810,9 @@ class MetricsService:
 
         # ── Margin change impact decomposition ─────────────
         # Compare current vs previous period by dimension
-        if prev_period and dimension != "company":
+        if compare_period and dimension != "company":
             curr_dim = period_dim_bucket.get(current_period, {})
-            prev_dim = period_dim_bucket.get(prev_period, {})
+            prev_dim = period_dim_bucket.get(compare_period, {})
             curr_total_rev = sum(bk.get("revenue", 0) for bk in curr_dim.values())
             prev_total_rev = sum(bk.get("revenue", 0) for bk in prev_dim.values())
             margin_analysis = []
@@ -595,12 +875,14 @@ class MetricsService:
                 c_gp = c_rev - c_cost
             c_gm = _safe_div(c_gp, c_rev) * 100 if (c_gp is not None and c_rev) else None
             c_contrib = _safe_div(c_gp, total_cust_rev) * 100 if (c_gp is not None and total_cust_rev) else None
+            c_rev_contrib = _safe_div(c_rev, total_cust_rev) * 100 if (c_rev is not None and total_cust_rev) else None
             customer_breakdown.append(BreakdownItem(
                 dimension_value=cust_name,
                 revenue=_round(c_rev),
                 tax_excluded_cost=_round(c_cost),
                 gross_profit=_round(c_gp),
                 gross_margin=_round(c_gm),
+                revenue_contribution=_round(c_rev_contrib),
                 gross_margin_contribution=_round(c_contrib),
                 calculable=(c_rev is not None and c_gp is not None),
             ))

@@ -62,6 +62,7 @@ class LayoutRecommendResponse(BaseModel):
 class ChatContext(BaseModel):
     """BI context passed with each chat request."""
     period: str | None = None
+    period_dimension: str | None = None
     department: str | None = None
     product: str | None = None
     period_compare_type: str | None = None

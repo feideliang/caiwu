@@ -121,7 +121,7 @@ class Settings(BaseSettings):
     report_output_dir: str = "./output/reports"
 
     # ── Vector DB (Qdrant RAG) ────────────────────────────────
-    qdrant_path: str = "./qdrant_data"
+    qdrant_path: str = "./qdrant_data_seed"
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
 

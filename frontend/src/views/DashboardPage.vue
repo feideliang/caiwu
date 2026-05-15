@@ -5,8 +5,8 @@
       <a-space wrap>
         <a-select v-model:value="periodDimension" style="width: 120px" placeholder="周期维度">
           <a-select-option value="monthly">月度</a-select-option>
-          <a-select-option value="quarterly">季度</a-select-option>
-          <a-select-option value="cumulative">年累计</a-select-option>
+          <a-select-option value="weekly">季度</a-select-option>
+          <a-select-option value="yearly">年累计</a-select-option>
           <a-select-option value="custom">自定义期间</a-select-option>
         </a-select>
         <a-range-picker
@@ -58,7 +58,7 @@ const isSmall = ref(window.innerWidth < 1024);
 const loading = ref(false);
 
 // Filter state
-const periodDimension = ref<string>('cumulative'); // monthly / quarterly / cumulative / custom
+const periodDimension = ref<string>('monthly'); // monthly / weekly / yearly / custom
 const selectedPeriod = ref<string | undefined>();
 const customRange = ref<[any, any] | null>(null);
 const periodStart = ref<string | undefined>();
@@ -72,16 +72,16 @@ const productOptions = ref<Array<{ label: string; value: string }>>([]);
 const allPeriods = ref<string[]>([]);
 
 // Derived period for simple month filter (monthly mode)
-// For cumulative mode, period is a year string like "2026"
+// For yearly mode, period is a year string like "2026"
 const period = computed(() => {
   if (periodDimension.value === 'monthly') {
     return selectedPeriod.value;
   }
-  if (periodDimension.value === 'cumulative') {
-    // Return year only for cumulative mode
+  if (periodDimension.value === 'yearly') {
+    // Return year only for yearly mode
     return selectedPeriod.value ? selectedPeriod.value.slice(0, 4) : undefined;
   }
-  if (periodDimension.value === 'quarterly') {
+  if (periodDimension.value === 'weekly') {
     return undefined; // handled by periodStart/periodEnd
   }
   return undefined;
@@ -89,18 +89,29 @@ const period = computed(() => {
 
 // Dynamic period select options based on dimension
 const periodSelectOptions = computed<Array<{ label: string; value: string }>>(() => {
-  if (periodDimension.value === 'quarterly') {
-    const quarters = new Set<string>();
+  if (periodDimension.value === 'weekly') {
+    // Generate week options from months: each month → ~4 weeks
+    const weeks: Array<{ label: string; value: string }> = [];
+    const monthSet = new Set<string>();
     for (const p of allPeriods.value) {
       if (p.includes('-')) {
         const [y, m] = p.split('-');
-        const q = Math.ceil(parseInt(m) / 3);
-        quarters.add(`${y}Q${q}`);
+        monthSet.add(`${y}-${m}`);
       }
     }
-    return [...quarters].sort().map((v) => ({ label: v, value: v }));
+    for (const ym of [...monthSet].sort().reverse()) {
+      const [y, m] = ym.split('-');
+      const monthNum = parseInt(m);
+      // Each month generates 4 week slots
+      for (let w = 1; w <= 4; w++) {
+        const weekLabel = `${y}年${monthNum}月第${w}周`;
+        const weekValue = `${y}-W${(monthNum - 1) * 4 + w}`;
+        weeks.push({ label: weekLabel, value: weekValue });
+      }
+    }
+    return weeks;
   }
-  if (periodDimension.value === 'cumulative') {
+  if (periodDimension.value === 'yearly') {
     // Year options only: "2026年" etc.
     const years = new Set<string>();
     for (const p of allPeriods.value) {
@@ -119,7 +130,7 @@ const periodSelectOptions = computed<Array<{ label: string; value: string }>>(()
       months.add(`${y}-${m}`);
     }
   }
-  return [...months].sort().map((v) => {
+  return [...months].sort().reverse().map((v) => {
     const [y, m] = v.split('-');
     return { label: `${y}年${parseInt(m)}月`, value: `${y}-${m.padStart(2, '0')}` };
   });
@@ -148,19 +159,20 @@ watch([selectedPeriod, periodDimension], () => {
     periodEnd.value = undefined;
     return;
   }
-  if (periodDimension.value === 'quarterly') {
-    // Convert "2026Q1" to period range
-    const match = selectedPeriod.value.match(/^(\d{4})Q(\d)$/);
+  if (periodDimension.value === 'weekly') {
+    // Convert week value like "2026-W5" to a month range
+    const match = selectedPeriod.value.match(/^(\d{4})-W(\d+)$/);
     if (match) {
       const y = match[1];
-      const q = parseInt(match[2]);
-      periodStart.value = `${y}-${String((q - 1) * 3 + 1).padStart(2, '0')}`;
-      periodEnd.value = `${y}-${String(q * 3).padStart(2, '0')}`;
+      const w = parseInt(match[2]);
+      const month = Math.min(12, Math.ceil(w / 4));
+      periodStart.value = `${y}-${String(month).padStart(2, '0')}`;
+      periodEnd.value = `${y}-${String(month).padStart(2, '0')}`;
     }
   } else if (periodDimension.value === 'monthly') {
     periodStart.value = selectedPeriod.value;
     periodEnd.value = undefined;
-  } else if (periodDimension.value === 'cumulative') {
+  } else if (periodDimension.value === 'yearly') {
     // Full year range: selectedPeriod is "2026"
     const y = selectedPeriod.value.slice(0, 4);
     periodStart.value = `${y}-01`;
@@ -196,12 +208,12 @@ async function fetchFilterOptions() {
 
     // Default: select latest period
     if (!selectedPeriod.value && allPeriods.value.length) {
-      if (periodDimension.value === 'cumulative') {
+      if (periodDimension.value === 'yearly') {
         // Extract year from latest period
-        const latest = allPeriods.value[0];
+        const latest = allPeriods.value[allPeriods.value.length - 1];
         selectedPeriod.value = latest.includes('-') ? latest.slice(0, 4) : latest;
       } else {
-        selectedPeriod.value = allPeriods.value[0];
+        selectedPeriod.value = allPeriods.value[allPeriods.value.length - 1];
       }
     }
 
@@ -236,6 +248,10 @@ onUnmounted(() => window.removeEventListener('resize', updateSize));
   .dashboard-header {
     grid-column: 1 / -1;
     padding: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--color-bg-layout);
   }
 
   .dashboard-content {

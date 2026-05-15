@@ -23,7 +23,7 @@
       </a-menu-item>
       <a-menu-item key="metrics">
         <template #icon><FundOutlined /></template>
-        <span>核心指标</span>
+        <span>变动分析</span>
       </a-menu-item>
       <a-menu-item key="trend-analysis">
         <template #icon><LineChartOutlined /></template>

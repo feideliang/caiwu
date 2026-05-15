@@ -21,6 +21,7 @@
           <CaretDownOutlined v-else-if="trend < 0" />
           {{ Math.abs(trend) }}{{ trendSuffix }}
         </span>
+        <span v-else class="trend text-secondary">—</span>
       </template>
     </a-statistic>
     <div v-else class="text-kpi">

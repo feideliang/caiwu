@@ -4,9 +4,39 @@
       <a-page-header title="部门分析" sub-title="部门收入、毛利、贡献度与经营效率">
         <template #extra>
           <a-space wrap>
-            <a-select v-model:value="period" :options="periodOptions" style="width: 140px" placeholder="期间" allow-clear />
+            <!-- Period dimension selector -->
+            <a-select v-model:value="periodDimension" style="width: 120px" placeholder="周期维度">
+              <a-select-option value="monthly">月度</a-select-option>
+              <a-select-option value="weekly">季度</a-select-option>
+              <a-select-option value="yearly">年累计</a-select-option>
+              <a-select-option value="custom">自定义期间</a-select-option>
+            </a-select>
+            <!-- Period selector -->
+            <a-range-picker
+              v-if="periodDimension === 'custom'"
+              v-model:value="customRange"
+              picker="month"
+              :allow-clear="true"
+              style="width: 280px"
+              format="YYYY年M月"
+              @change="onCustomRangeChange"
+            />
+            <a-select
+              v-else
+              v-model:value="selectedPeriod"
+              :options="periodSelectOptions"
+              style="width: 160px"
+              placeholder="筛选周期"
+              allow-clear
+            />
+            <!-- Compare base period -->
+            <a-select v-model:value="compareBase" style="width: 120px" placeholder="对比基期">
+              <a-select-option value="yoy">同比</a-select-option>
+              <a-select-option value="mom">环比</a-select-option>
+              <a-select-option value="custom_compare">自定义期间</a-select-option>
+            </a-select>
+            <!-- Department selector -->
             <a-select v-model:value="selectedDept" :options="deptOptions" style="width: 180px" placeholder="部门" allow-clear />
-            <a-select v-model:value="compare" :options="compareOptions" style="width: 120px" />
             <a-button type="primary" @click="refresh">刷新</a-button>
           </a-space>
         </template>
@@ -16,31 +46,19 @@
       <!-- Insight Cards -->
       <InlineInsights :breakdowns="breakdowns" :summary="summary" dimension="department" :max-count="5" class="section" />
 
-      <!-- KPI Cards (8) -->
+      <!-- KPI Cards (4) -->
       <a-row :gutter="[12, 12]" class="kpi-row">
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="本年累计收入" :value="toWan(summary?.revenue)" unit="万元" />
+          <KpiCard title="营业收入" :value="toWan(summary?.revenue)" unit="万元" :precision="2" :trend="summary?.revenue_yoy_growth" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="目标达成率" :value="summary?.achievement_rate || 0" unit="%" />
+          <KpiCard title="毛利额" :value="toWan(summary?.gross_profit)" unit="万元" :precision="2" :trend="summary?.gross_profit_yoy_growth" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="核心市场线" :value="0" :label-display="summary?.core_market_line || '-'" />
+          <KpiCard title="毛利率" :value="summary?.gross_margin || 0" unit="%" :precision="2" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="总订单数" :value="summary?.order_count || 0" unit="笔" />
-        </a-col>
-        <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="本年累计毛利" :value="toWan(summary?.gross_profit)" unit="万元" />
-        </a-col>
-        <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="整体毛利率" :value="summary?.gross_margin || 0" unit="%" />
-        </a-col>
-        <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="最高价值市场线" :value="0" :label-display="summary?.highest_value_market_line || '-'" />
-        </a-col>
-        <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="亏损订单占比" :value="summary?.loss_ratio || 0" unit="%" />
+          <KpiCard title="亏损订单占比" :value="summary?.loss_ratio || 0" unit="%" :precision="2" />
         </a-col>
       </a-row>
 
@@ -50,13 +68,7 @@
           <ChartWidget title="收入分布" :data="deptRevenueDist" chart-type="pie" :loading="loading" />
         </a-col>
         <a-col :xs="24" :md="12">
-          <ChartWidget title="部门收入排行" :data="deptRevenueRanking" chart-type="bar" :loading="loading" />
-        </a-col>
-        <a-col :xs="24" :md="12">
-          <ChartWidget title="部门利润排行" :data="deptProfitRanking" chart-type="bar" :loading="loading" />
-        </a-col>
-        <a-col :xs="24" :md="12">
-          <ChartWidget title="部门毛利率对比" :data="deptMarginCompare" chart-type="bar" :loading="loading" />
+          <ChartWidget title="部门收入毛利率对比" :data="deptMarginCompare" chart-type="grouped-bar" :loading="loading" />
         </a-col>
       </a-row>
 
@@ -68,34 +80,29 @@
           :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (t: number) => `共 ${t} 条` }"
           row-key="dimension_value"
           size="small"
-          :scroll="{ x: 1200 }"
+          :scroll="{ x: 1000 }"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'revenue'">
               {{ formatWan((record as BreakdownItem).revenue) }}
             </template>
+            <template v-if="column.key === 'revenue_contribution'">
+              {{ formatMargin((record as BreakdownItem).revenue_contribution) }}
+            </template>
             <template v-if="column.key === 'gross_profit'">
               {{ formatWan((record as BreakdownItem).gross_profit) }}
+            </template>
+            <template v-if="column.key === 'gross_margin_contribution'">
+              {{ formatMargin((record as BreakdownItem).gross_margin_contribution) }}
             </template>
             <template v-if="column.key === 'gross_margin'">
               {{ formatMargin((record as BreakdownItem).gross_margin) }}
             </template>
-            <template v-if="column.key === 'order_count'">
-              {{ (record as BreakdownItem).order_count ?? '-' }}
+            <template v-if="column.key === 'neg_margin_order_count'">
+              {{ (record as BreakdownItem).neg_margin_order_count ?? '-' }}
             </template>
-            <template v-if="column.key === 'avg_order_value'">
-              {{ (record as BreakdownItem).avg_order_value != null ? formatWan((record as BreakdownItem).avg_order_value) : '-' }}
-            </template>
-            <template v-if="column.key === 'revenue_yoy_growth'">
-              <span :style="{ color: ((record as BreakdownItem).revenue_yoy_growth ?? 0) >= 0 ? '#52c41a' : '#ff4d4f' }">
-                {{ formatGrowth((record as BreakdownItem).revenue_yoy_growth) }}
-              </span>
-            </template>
-            <template v-if="column.key === 'health'">
-              <a-tooltip>
-                <template #title>{{ getHealthFormula(record as BreakdownItem) }}</template>
-                <a-tag :color="getHealthColor(record as BreakdownItem)">{{ getHealthLabel(record as BreakdownItem) }}</a-tag>
-              </a-tooltip>
+            <template v-if="column.key === 'neg_margin_amount'">
+              {{ (record as BreakdownItem).neg_margin_amount != null ? formatWan((record as BreakdownItem).neg_margin_amount) : '-' }}
             </template>
           </template>
         </a-table>
@@ -124,38 +131,79 @@ onMounted(() => window.addEventListener('resize', updateSize));
 onUnmounted(() => window.removeEventListener('resize', updateSize));
 const showAssistant = computed(() => !isSmall.value);
 
-const period = ref<string | undefined>('2026-03');
-const compare = ref('mom');
+// Filter state
+const periodDimension = ref<string>('yearly');
+const selectedPeriod = ref<string | undefined>();
+const compareBase = ref<string>('yoy');
 const selectedDept = ref<string | undefined>();
+const customRange = ref<[any, any] | null>(null);
+const allPeriods = ref<string[]>([]);
+const deptOptions = ref<Array<{ label: string; value: string }>>([]);
 const loading = ref(false);
 const metricsData = ref<CoreMetricsResponse | null>(null);
-const periodOptions = ref<Array<{ label: string; value: string }>>([]);
-const deptOptions = ref<Array<{ label: string; value: string }>>([]);
 
-const compareOptions = [
-  { label: '环比', value: 'mom' },
-  { label: '同比', value: 'yoy' },
-  { label: '累计', value: 'cumulative' },
-];
+// Derived period
+const period = computed(() => {
+  if (periodDimension.value === 'monthly') return selectedPeriod.value;
+  if (periodDimension.value === 'yearly') return selectedPeriod.value ? selectedPeriod.value.slice(0, 4) : undefined;
+  if (periodDimension.value === 'weekly') {
+    if (selectedPeriod.value && selectedPeriod.value.includes('-Q')) {
+      const [y, qStr] = selectedPeriod.value.split('-Q');
+      return `${y}-${String(parseInt(qStr) * 3).padStart(2, '0')}`;
+    }
+    return selectedPeriod.value;
+  }
+  return undefined;
+});
+
+// Period select options
+const periodSelectOptions = computed<Array<{ label: string; value: string }>>(() => {
+  if (periodDimension.value === 'weekly') {
+    const quarters = new Set<string>();
+    for (const p of allPeriods.value) {
+      if (p.includes('-')) {
+        const [y, m] = p.split('-');
+        quarters.add(`${y}-Q${Math.ceil(parseInt(m) / 3)}`);
+      }
+    }
+    return [...quarters].sort().reverse().map((v) => ({ label: v, value: v }));
+  }
+  if (periodDimension.value === 'yearly') {
+    const years = new Set<string>();
+    for (const p of allPeriods.value) { if (p.includes('-')) years.add(p.split('-')[0]); }
+    return [...years].sort().reverse().map((y) => ({ label: `${y}年`, value: `${y}` }));
+  }
+  const months = new Set<string>();
+  for (const p of allPeriods.value) { if (p.includes('-')) months.add(`${p.split('-')[0]}-${p.split('-')[1]}`); }
+  return [...months].sort().reverse().map((v) => {
+    const [y, m] = v.split('-');
+    return { label: `${y}年${parseInt(m)}月`, value: `${y}-${m}` };
+  });
+});
+
+function onCustomRangeChange(_dates: any) {
+  // handled via periodStart/periodEnd if needed
+}
+
+watch(periodDimension, () => {
+  const opts = periodSelectOptions.value;
+  if (opts.length) selectedPeriod.value = opts[0].value;
+});
 
 const summary = computed(() => metricsData.value?.summary);
 const breakdowns = computed<BreakdownItem[]>(() => metricsData.value?.breakdowns || []);
 
+// Table columns
 const deptTableColumns = [
   { title: '部门', dataIndex: 'dimension_value', key: 'dimension_value', width: 140, fixed: 'left' },
   { title: '收入(万元)', key: 'revenue', width: 120, sorter: (a: BreakdownItem, b: BreakdownItem) => (a.revenue || 0) - (b.revenue || 0) },
-  { title: '毛利(万元)', key: 'gross_profit', width: 120, sorter: (a: BreakdownItem, b: BreakdownItem) => (a.gross_profit || 0) - (b.gross_profit || 0) },
-  { title: '毛利率', key: 'gross_margin', width: 100, sorter: (a: BreakdownItem, b: BreakdownItem) => (a.gross_margin || 0) - (b.gross_margin || 0) },
-  { title: '订单数', key: 'order_count', width: 100, sorter: (a: BreakdownItem, b: BreakdownItem) => (a.order_count || 0) - (b.order_count || 0) },
-  { title: '客单价(万元)', key: 'avg_order_value', width: 130, sorter: (a: BreakdownItem, b: BreakdownItem) => (a.avg_order_value || 0) - (b.avg_order_value || 0) },
-  { title: '同比增长', key: 'revenue_yoy_growth', width: 120, sorter: (a: BreakdownItem, b: BreakdownItem) => (a.revenue_yoy_growth || 0) - (b.revenue_yoy_growth || 0) },
-  { title: '健康度', key: 'health', width: 100 },
+  { title: '收入贡献度', key: 'revenue_contribution', width: 120 },
+  { title: '毛利(万元)', key: 'gross_profit', width: 120 },
+  { title: '毛利贡献度', key: 'gross_margin_contribution', width: 120 },
+  { title: '毛利率', key: 'gross_margin', width: 100 },
+  { title: '负毛利订单数量', key: 'neg_margin_order_count', width: 140 },
+  { title: '负毛利金额(万元)', key: 'neg_margin_amount', width: 140 },
 ];
-
-function formatGrowth(v: number | null | undefined): string {
-  if (v == null) return '-';
-  return v.toFixed(2) + '%';
-}
 
 function formatMargin(v: number | string | undefined | null): string {
   if (v == null || v === '') return '-';
@@ -163,68 +211,25 @@ function formatMargin(v: number | string | undefined | null): string {
   return isNaN(n) ? '-' : n.toFixed(2) + '%';
 }
 
-function getHealthLabel(item: BreakdownItem): string {
-  const margin = typeof item.gross_margin === 'number' ? item.gross_margin : Number(item.gross_margin) || 0;
-  const growth = item.revenue_yoy_growth ?? 0;
-  if (margin >= 30 && growth >= 0) return '健康';
-  if (margin >= 15 && growth >= -10) return '一般';
-  if (margin < 0) return '亏损';
-  return '关注';
-}
-
-function getHealthColor(item: BreakdownItem): string {
-  const margin = typeof item.gross_margin === 'number' ? item.gross_margin : Number(item.gross_margin) || 0;
-  const growth = item.revenue_yoy_growth ?? 0;
-  if (margin >= 30 && growth >= 0) return 'green';
-  if (margin >= 15 && growth >= -10) return 'orange';
-  if (margin < 0) return 'red';
-  return 'gold';
-}
-
-function getHealthFormula(item: BreakdownItem): string {
-  const margin = typeof item.gross_margin === 'number' ? item.gross_margin : Number(item.gross_margin) || 0;
-  const growth = item.revenue_yoy_growth ?? 0;
-  if (margin >= 30 && growth >= 0) return '健康：毛利率 >= 30% 且 同比增长 >= 0%';
-  if (margin >= 15 && growth >= -10) return '一般：毛利率 >= 15% 且 同比增长 >= -10%';
-  if (margin < 0) return '亏损：毛利率 < 0%';
-  return '关注：未达到健康或一般标准，需重点关注';
-}
-
 // Chart 1: Revenue distribution (pie)
 const deptRevenueDist = computed(() =>
-  breakdowns.value.map((b) => ({
-    部门: b.dimension_value,
-    收入: b.revenue || 0,
-  }))
+  breakdowns.value.map((b) => ({ 部门: b.dimension_value, 收入: b.revenue || 0 }))
 );
 
-// Chart 2: Department revenue ranking (bar)
-const deptRevenueRanking = computed(() =>
-  [...breakdowns.value]
-    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
-    .map((b) => ({ 部门: b.dimension_value, 收入: b.revenue || 0 }))
-);
-
-// Chart 3: Department profit ranking (bar)
-const deptProfitRanking = computed(() =>
-  [...breakdowns.value]
-    .sort((a, b) => (b.gross_profit || 0) - (a.gross_profit || 0))
-    .map((b) => ({ 部门: b.dimension_value, 毛利额: b.gross_profit || 0 }))
-);
-
-// Chart 4: Department margin comparison (bar)
+// Chart 2: Department revenue + gross profit grouped horizontal bar
 const deptMarginCompare = computed(() =>
   breakdowns.value.map((b) => ({
     部门: b.dimension_value,
-    毛利率: b.gross_margin || 0,
-    收入: b.revenue || 0,
+    营业收入: b.revenue || 0,
+    毛利额: b.gross_profit || 0,
   }))
 );
 
 const assistantContext = computed(() => ({
   period: period.value,
   department: selectedDept.value,
-  period_compare_type: compare.value,
+  period_dimension: periodDimension.value,
+  period_compare_type: compareBase.value,
   active_section: 'department',
 }));
 
@@ -235,7 +240,7 @@ async function fetchMetrics() {
       period: period.value,
       dimension: 'department',
       entity: selectedDept.value,
-      compare: compare.value,
+      period_dimension: periodDimension.value,
     });
     metricsData.value = resp.data as CoreMetricsResponse;
   } finally {
@@ -246,26 +251,20 @@ async function fetchMetrics() {
 async function fetchOptions() {
   const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
   const periods = ((periodResp.data as any)?.options || []) as string[];
-  periodOptions.value = periods.map((v) => ({ label: v, value: v })).reverse();
-  if (!period.value && periods.length) period.value = periods[periods.length - 1];
-}
-
-async function loadDeptOptions() {
+  allPeriods.value = periods;
+  if (!selectedPeriod.value && periods.length) {
+    selectedPeriod.value = periodDimension.value === 'yearly' ? periods[periods.length - 1].slice(0, 4) : periods[periods.length - 1];
+  }
   const { data: deptResp } = await getFilterOptions({ dimension: 'department' });
   const depts = ((deptResp.data as any)?.options || []) as string[];
-  if (depts.length) {
-    deptOptions.value = depts.map((v) => ({ label: v, value: v }));
-  } else {
-    // Fallback: derive from metrics breakdowns
-    const deptValues = new Set(breakdowns.value.map((b) => b.dimension_value));
-    deptOptions.value = [...deptValues].map((v) => ({ label: v, value: v }));
-  }
+  deptOptions.value = depts.map((v) => ({ label: v, value: v }));
 }
 
 function refresh() { fetchMetrics(); }
-watch([period, compare, selectedDept], refresh);
 
-onMounted(async () => { await fetchOptions(); await fetchMetrics(); await loadDeptOptions(); });
+watch([periodDimension, selectedPeriod, compareBase, selectedDept], refresh);
+
+onMounted(async () => { await fetchOptions(); await fetchMetrics(); });
 </script>
 
 <style scoped lang="less">
@@ -277,6 +276,10 @@ onMounted(async () => { await fetchOptions(); await fetchMetrics(); await loadDe
   .analysis-header {
     grid-column: 1 / -1;
     padding: 0 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--color-bg-layout);
   }
 
   .analysis-content {

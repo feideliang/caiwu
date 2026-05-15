@@ -5,17 +5,15 @@ import type { ApiResponse } from '@/types/api';
 
 let isHandling401 = false;
 
-// Dedup error popups: same URL + status within 60s → show once
-const errorPopupCache = new Map<string, number>();
-const ERROR_POPUP_COOLDOWN_MS = 60_000;
+// Dedup error popups: same URL + status → show once per session
+const errorPopupShown = new Set<string>();
 
 function shouldShowErrorPopup(url: string, status: number): boolean {
   const key = `${status}:${url}`;
-  const lastShown = errorPopupCache.get(key);
-  if (lastShown && Date.now() - lastShown < ERROR_POPUP_COOLDOWN_MS) {
+  if (errorPopupShown.has(key)) {
     return false;
   }
-  errorPopupCache.set(key, Date.now());
+  errorPopupShown.add(key);
   return true;
 }
 

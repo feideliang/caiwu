@@ -268,15 +268,90 @@ logger = logging.getLogger(__name__)
 
 _KNOWLEDGE_BASE_RULES = (
     "【业务规则知识库】\n"
-    "- 毛利率 <20%：一般异常，需纳入常规审视\n"
-    "- 毛利率 <10%：严重异常，必须立即启动下钻分析\n"
-    "- 毛利率 >60%：需验证是技术溢价还是偶然性项目\n"
-    "- 连续3月环比正增长 = 上升趋势，需总结驱动因素\n"
-    "- 单一客户收入占比 >30%：客户集中度风险预警\n"
-    "- 单一产品毛利贡献占比 >40%：产品集中度风险预警\n"
-    "- 下钻路径：公司 → 组织/时间 → 客户/产品 → 交易/项目\n"
-    "- 毛利率变化拆解公式：结构影响 = (当期占比-基期占比)×基期毛利率/100；毛利影响 = 当期占比×(当期毛利率-基期毛利率)/100\n"
-    "回答时必须引用上述规则，用阈值判断数据是否异常，给出下钻方向。\n"
+
+    # ── 指标公式 ──
+    "--- 核心指标公式 ---\n"
+    "毛利率 = (收入 - 不含税成本) / 收入 × 100%\n"
+    "毛利额 = 收入 - 不含税成本\n"
+    "毛利率贡献度 = 某维度毛利额 / 总毛利额 × 100%\n"
+    "收入贡献度 = 某维度收入 / 总收入 × 100%\n"
+    "客户集中度 = 前三大客户收入 / 总收入 × 100%\n"
+    "产品集中度 = 前三大产品线毛利 / 总毛利 × 100%\n"
+    "亏损订单占比 = 毛利率为负的订单数 / 总订单数 × 100%\n"
+    "亏损产品占比 = 毛利率为负的产品数 / 总产品数 × 100%\n"
+    "高毛利订单占比 = 毛利率 > 40% 的订单数 / 总订单数 × 100%\n"
+    "同比增长率 = (本期 - 去年同期) / 去年同期 × 100%\n"
+    "毛利率变化拆解(每个维度)：结构影响 = (当期收入占比 - 基期收入占比) × 基期毛利率 / 100；毛利变化影响 = 当期收入占比 × (当期毛利率 - 基期毛利率) / 100；合计 = 结构影响 + 毛利变化影响\n"
+    "收入/毛利额变动影响：各维度(当期值 - 基期值) / 总变化绝对值，累计贡献80%的为主要变动因素\n"
+
+    # ── 异常阈值 ──
+    "--- 异常检测阈值 ---\n"
+    "毛利率 < 20%：一般异常，需纳入常规审视\n"
+    "毛利率 < 10%：严重异常，必须立即启动下钻分析，排查定价失误、成本异常或特殊竞争性项目\n"
+    "毛利率 > 60%：需分析确认是技术领先带来的溢价还是偶然性项目，判断成功模式是否可复制\n"
+    "单一客户销售收入占比 > 30%：触发客户集中度风险预警\n"
+    "前三大客户集中度 > 60%：客户集中度过高，需关注\n"
+    "单一产品系列毛利贡献占比 > 40%：触发产品集中度风险预警\n"
+    "前三大产品线毛利集中度 > 70%：产品集中度过高，需培育第二增长曲线\n"
+    "高毛利订单阈值：毛利率 > 40% 的订单为优质高毛利订单\n"
+    "亏损定义：毛利率为负的订单/产品为亏损\n"
+
+    # ── 趋势规则 ──
+    "--- 趋势分析规则 ---\n"
+    "任一销售部门或产品事业部的收入或毛利额连续三个月实现环比正增长 → 上升趋势，需总结驱动因素\n"
+    "同比分析：排除季节性影响，评估长期趋势和年度战略效果，必须对比相同自然月或季度\n"
+    "环比分析：监控短期业务波动和月度执行异常，注意月末、季末冲量行为对数据的扰动\n"
+    "累计分析：评估年度目标达成进度，若累计毛利率低于时间进度要求，为下半年定价调整或成本优化提供依据\n"
+
+    # ── 下钻路径 ──
+    "--- 下钻分析路径 ---\n"
+    "第一层：公司整体层面，观察收入规模、毛利额及毛利率是否达成预期\n"
+    "第二层：组织与时间维度下钻，定位异常部门或产品事业部\n"
+    "第三层：客户与产品维度交叉分析，分析客户签约类型或物料成本大类×产品系列\n"
+    "第四层：交易与项目维度根因定位，穿透至订单分类、项目名称、关键客户\n"
+    "产品钻取路径：产品线(product_line) → 销售产品名称(sales_product_name)\n"
+
+    # ── 可用的分析维度字段 ──
+    "--- 数据维度说明（financial_data tags JSON字段）---\n"
+    "组织维度：department(市场线:CBG/EBG/SBG/TBU), sales_department(销售部门), hr_department(HR部门), hr_dept_code\n"
+    "产品维度：product_line(产品线), series(产品系列), product_category(产品大类), product_classification(产品分类), product_family(产品族), product_bu_name(产品事业部名称), product_bu_code(产品事业部代码), product_org(产品所属组织), product_bgbu(产品归属BGBU)\n"
+    "销售产品维度：sales_product_code(销售产品代码), sales_product_name(销售产品名称), material_code(物料编码), material_desc(物料描述), material_cost_category(物料成本大类)\n"
+    "成本分类维度：cost_class_1(一级成本分类), cost_class_2(二级成本分类), cost_class_3(三级成本分类), cost_category(成本大类)\n"
+    "客户维度：customer(客户), ncc_customer_code(NCC客户编码), order_customer(订单客户), invoice_customer(开票客户简称), invoice_name(开票名称), final_customer(最终客户名称), superior_name(上级名称), contract_type(客户签约类型:直签/渠道)\n"
+    "订单维度：order_id(订单编号), contract_no(合同编号), order_header_type(订单头类型), order_category(订单分类), sales_type(内销/外销)\n"
+    "地理维度：province(省份), market_segment(细分市场), application_scenario(应用场合), project_name(项目名称)\n"
+    "财务维度：currency(币种), exchange_rate(汇率), tax_rate(税率), order_qty(订单数量), unit_cost_ex_tax(不含税单位成本), unit_cost_incl_tax(含税单位成本)\n"
+    "期间维度：period(YYYY-MM格式), 支持月度/季度/年累计/自定义期间四种维度\n"
+    "比较类型：yoy(同比,上年同期), mom(环比,上月), cumulative(累计)\n"
+
+    # ── 分析页面业务逻辑 ──
+    "--- 总览驾驶舱 ---\n"
+    "核心KPI：营业收入、营业成本、毛利额、毛利率+同比变化值\n"
+    "趋势图：月度趋势(收入/成本/毛利额柱线+毛利率次坐标轴)\n"
+    "智能洞察：基于KPI和阈值的规则化告警信息\n"
+
+    "--- 变动分析 ---\n"
+    "三大模块：收入变动、毛利额变动、毛利率变动，均对比基期(同期/上月)\n"
+    "收入变动：当期收入/基期收入/变化比例 + 主要变动影响(各维度贡献累计80%的为主要因素)\n"
+    "毛利额变动：当期毛利额/基期毛利额/变化比例 + 主要变动影响\n"
+    "毛利率变动：当期毛利率/基期毛利率/变化值(pp) + 结构影响 + 单因素毛利影响\n"
+    "集中度排名：收入/毛利额/毛利率三个指标并行展示维度排名\n"
+
+    "--- 部门分析 ---\n"
+    "维度：department, 按销售部门(市场线)分析收入和毛利\n"
+    "KPI：营业收入、毛利额、毛利率、亏损订单占比\n"
+    "图表：收入分布饼图 + 部门收入毛利率对比( grouped-bar双轴)\n"
+    "明细列：收入贡献度、毛利贡献度、负毛利订单数量、负毛利金额\n"
+
+    "--- 产品分析 ---\n"
+    "维度：product_line, 按产品线分析收入和毛利\n"
+    "KPI：收入、毛利额、毛利率、亏损产品占比\n"
+    "图表：产品收入排行(bar) + 产品线收入毛利对比(grouped-bar) + 毛利率分布(pie) + 收入毛利气泡图(scatter)\n"
+    "钻取：点击产品线可下钻到sales_product_name层级，查看具体销售产品明细\n"
+    "明细列：收入贡献度、毛利贡献度、负毛利产品数量、负毛利金额\n"
+
+    "回答时必须引用上述规则，用阈值判断数据是否异常，给出下钻方向和业务建议。\n"
+    "数据来源于financial_data表，每条记录包含metric_name(revenue/cost/gross_profit/profit_margin)和metric_value。\n"
 )
 
 
@@ -536,11 +611,16 @@ async def ai_chat(
     kpis = await _build_kpis(
         db,
         period_compare_type=ctx.period_compare_type if ctx else None,
+        period_dimension=ctx.period_dimension if ctx else None,
+        period=ctx.period if ctx else None,
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )
     dept_items, prod_items = await _build_dimension_breakdowns(
         db,
+        period_compare_type=ctx.period_compare_type if ctx else None,
+        period_dimension=ctx.period_dimension if ctx else None,
+        period=ctx.period if ctx else None,
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )
@@ -552,7 +632,7 @@ async def ai_chat(
 
     t1 = time.time()
     bi_context = _build_bi_context(kpis, dept_items, prod_items)
-    print(f"[TIMING] DB queries: {db_elapsed:.2f}s, context build: {time.time()-t1:.2f}s", flush=True)
+    logger.info(f"AI chat DB queries took {db_elapsed:.2f}s")
 
     # ── Qwen timing ─────────────────────────────────────────────
     t_qwen_start = time.time()
@@ -640,9 +720,9 @@ async def ai_chat(
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 ai_answer = await _call_qwen_api(client, settings, prompt)
-            print(f"[TIMING] Qwen API success: {time.time()-t_qwen_start:.2f}s", flush=True)
+            logger.info(f"Qwen API success in {time.time()-t_qwen_start:.2f}s")
         except Exception as e:
-            print(f"[TIMING] Qwen fallback after {time.time()-t_qwen_start:.2f}s, error: {e}", flush=True)
+            logger.warning(f"Qwen fallback after {time.time()-t_qwen_start:.2f}s, error: {e}")
 
     # Fallback to rule-based (only for financial questions)
     if not ai_answer:
@@ -697,12 +777,12 @@ def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_ite
 
         data_lines = []
         k = kpis
-        data_lines.append(f"营业收入: {k.get('revenue', 0):,.0f}元, 毛利率: {k.get('gross_margin', 0):.1f}%, 毛利额: {k.get('gross_profit', 0):,.0f}元")
+        data_lines.append(f"营业收入: {k.get('revenue', 0)/10000:,.2f}万元, 毛利率: {k.get('gross_margin', 0):.1f}%, 毛利额: {k.get('gross_profit', 0)/10000:,.2f}万元")
         data_lines.append(f"达成率: {k.get('achievement_rate', 0):.0f}%, 收入环比: {k.get('revenue_mom_growth', 0):+.1f}%")
         if need_dept and dept_items:
-            data_lines.append("部门: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue',0):,.0f}毛利率{d.get('gross_margin',0):.1f}%" for d in dept_items[:5]))
+            data_lines.append("部门: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue',0)/10000:,.2f}万元毛利率{d.get('gross_margin',0):.1f}%" for d in dept_items[:5]))
         if need_prod and prod_items:
-            data_lines.append("产品: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue',0):,.0f}毛利率{d.get('gross_margin',0):.1f}%" for d in prod_items[:5]))
+            data_lines.append("产品: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue',0)/10000:,.2f}万元毛利率{d.get('gross_margin',0):.1f}%" for d in prod_items[:5]))
         data_section = "当前数据: " + "。".join(data_lines) + "。"
 
         system_role = (
@@ -783,11 +863,16 @@ async def ai_chat_stream(
     kpis = await _build_kpis(
         db,
         period_compare_type=ctx.period_compare_type if ctx else None,
+        period_dimension=ctx.period_dimension if ctx else None,
+        period=ctx.period if ctx else None,
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )
     dept_items, prod_items = await _build_dimension_breakdowns(
         db,
+        period_compare_type=ctx.period_compare_type if ctx else None,
+        period_dimension=ctx.period_dimension if ctx else None,
+        period=ctx.period if ctx else None,
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )

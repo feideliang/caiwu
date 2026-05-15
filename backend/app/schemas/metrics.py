@@ -49,9 +49,12 @@ class BreakdownItem(BaseModel):
     tax_excluded_cost: float | None = None
     gross_profit: float | None = None
     gross_margin: float | None = None
+    revenue_contribution: float | None = None
     gross_margin_contribution: float | None = None
     order_count: int | None = None
     avg_order_value: float | None = None  # 客单价(万元)
+    neg_margin_order_count: int | None = None
+    neg_margin_amount: float | None = None
     revenue_yoy_growth: float | None = None
     calculable: bool = True
     missing_fields: list[str] = Field(default_factory=list)
