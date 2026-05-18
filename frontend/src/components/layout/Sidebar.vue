@@ -37,6 +37,10 @@
         <template #icon><AreaChartOutlined /></template>
         <span>产品分析</span>
       </a-menu-item>
+      <a-menu-item key="customer-analysis">
+        <template #icon><TeamOutlined /></template>
+        <span>客户分析</span>
+      </a-menu-item>
       <a-menu-item key="insights">
         <template #icon><BulbOutlined /></template>
         <span>智能洞察</span>
@@ -95,6 +99,7 @@ import {
   BulbOutlined,
   ProfileOutlined,
   AreaChartOutlined,
+  TeamOutlined,
 } from '@ant-design/icons-vue';
 
 const router = useRouter();
@@ -112,6 +117,7 @@ const routeKeyMap: Record<string, string> = {
   TrendAnalysis: 'trend-analysis',
   DepartmentAnalysis: 'department-analysis',
   ProductAnalysis: 'product-analysis',
+  CustomerAnalysis: 'customer-analysis',
   Insights: 'insights',
   DrillDown: 'drilldown',
   Transactions: 'transactions',
@@ -136,6 +142,7 @@ const menuRouteMap: Record<string, string> = {
   'trend-analysis': '/trend-analysis',
   'department-analysis': '/department-analysis',
   'product-analysis': '/product-analysis',
+  'customer-analysis': '/customer-analysis',
   insights: '/insights',
   drilldown: '/drilldown',
   transactions: '/transactions',

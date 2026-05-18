@@ -34,7 +34,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { BreakdownItem } from '@/types/metrics';
-import { toWan } from '@/utils/format';
+import { formatPercent, formatWan } from '@/utils/format';
 
 const props = defineProps<{
   customers?: BreakdownItem[];
@@ -50,15 +50,15 @@ const DIMENSION_LABELS: Record<string, string> = {
 
 const panelTitle = computed(() => {
   const label = DIMENSION_LABELS[props.dimension || ''] || '';
-  return `Top 5 ${label}集中度排名`;
+  return `Top 10 ${label}集中度排名`;
 });
 
 const topItems = computed<BreakdownItem[]>(() => {
   if (props.dimension === 'customer' && props.customers?.length) {
-    return [...props.customers].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 5);
+    return [...props.customers].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 10);
   }
   if (props.breakdowns?.length) {
-    return [...props.breakdowns].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 5);
+    return [...props.breakdowns].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 10);
   }
   return [];
 });
@@ -72,13 +72,12 @@ function percent(value: number | undefined, max: number): number {
 }
 
 function formatNumber(v: number | undefined): string {
-  if (v === undefined || v === null) return '-';
-  return toWan(v).toLocaleString('zh-CN', { maximumFractionDigits: 2, minimumFractionDigits: 2 }) + ' 万元';
+  const formatted = formatWan(v);
+  return formatted === '-' ? formatted : `${formatted}万元`;
 }
 
 function formatMargin(v: number | undefined): string {
-  if (v === undefined || v === null) return '-';
-  return v.toFixed(2) + '%';
+  return formatPercent(v);
 }
 </script>
 

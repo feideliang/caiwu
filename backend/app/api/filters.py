@@ -45,14 +45,14 @@ def _normalize_view_filters(filters: dict | None) -> tuple[list[dict], str]:
 
 @router.get("/filter-options", response_model=APIResponse)
 async def get_filter_options(
-    dimension: str | None = Query(None, description="Dimension: period / entity / metric_name / department / product / product_line"),
+    dimension: str | None = Query(None, description="Dimension: period / entity / metric_name / department / product / product_line / customer"),
     prefix: str | None = Query(None, description="Optional prefix filter"),
     db: AsyncSession = Depends(get_db),
     user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
     """Return dynamic filter options for a given dimension.
 
-    Supported dimensions: period, entity, metric_name, department, product, product_line.
+    Supported dimensions: period, entity, metric_name, department, product, product_line, customer.
     Queries the financial_data table for distinct values.
     """
     col_map = {
@@ -72,12 +72,13 @@ async def get_filter_options(
             options = [str(r[0]) for r in result.all() if r[0] is not None]
             return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})
 
-        # Tag-based dimensions: department, product, product_line
-        if dimension in ("department", "product", "product_line"):
+        # Tag-based dimensions: department, product, product_line, customer
+        if dimension in ("department", "product", "product_line", "customer"):
             tag_key_map = {
                 "department": ["department"],
                 "product_line": ["product_line"],
                 "product": ["product", "series"],
+                "customer": ["customer"],
             }
             keys = tag_key_map.get(dimension, [])
             values = set()

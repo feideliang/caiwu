@@ -9,7 +9,7 @@ export interface InlineInsight {
   route?: RouteLocationRaw;
 }
 
-const DIM_LABELS: Record<string, string> = { department: '部门', product_line: '产品线', company: '公司' };
+const DIM_LABELS: Record<string, string> = { department: '部门', product_line: '产品线', company: '公司', customer: '客户' };
 
 function wan(v: number | undefined | null): string {
   if (v == null) return '0.0';
@@ -17,7 +17,7 @@ function wan(v: number | undefined | null): string {
 }
 
 export function useInlineInsights(opts: {
-  dimension: 'department' | 'product_line' | 'company';
+  dimension: 'department' | 'product_line' | 'company' | 'customer';
   breakdowns: ComputedRef<BreakdownItem[]>;
   summary: ComputedRef<CoreMetricsSummary | undefined>;
   trendSeries?: ComputedRef<TrendDataPoint[]>;
@@ -42,7 +42,7 @@ export function useInlineInsights(opts: {
           title: `${top.dimension_value}${dim}领跑全公司 ${wan(top.revenue)}万`,
           calculation: `计算方式：按各${dim}的 revenue 字段降序排列取最高值。${top.dimension_value} 的 revenue = ${top.revenue} 元 = ${wan(top.revenue)} 万元`,
           type: 'positive',
-          route: { path: dimension === 'department' ? '/department-analysis' : '/product-analysis', query: { entity: top.dimension_value } },
+          route: { path: dimension === 'department' ? '/department-analysis' : dimension === 'customer' ? '/customer-analysis' : '/product-analysis', query: { entity: top.dimension_value } },
         });
       }
 
@@ -54,7 +54,7 @@ export function useInlineInsights(opts: {
           title: `${best.dimension_value}${dim}毛利率最优 ${best.gross_margin.toFixed(1)}%`,
           calculation: `计算方式：按各${dim}的 gross_margin 字段降序排列取最高值。${best.dimension_value} 的 gross_margin = ${best.gross_margin.toFixed(2)}%`,
           type: best.gross_margin >= 30 ? 'positive' : 'neutral',
-          route: { path: dimension === 'department' ? '/department-analysis' : '/product-analysis', query: { entity: best.dimension_value } },
+          route: { path: dimension === 'department' ? '/department-analysis' : dimension === 'customer' ? '/customer-analysis' : '/product-analysis', query: { entity: best.dimension_value } },
         });
       }
 
@@ -64,7 +64,7 @@ export function useInlineInsights(opts: {
         title: `${declining}个${dim}收入同比下滑`,
         calculation: `计算方式：统计各${dim}的 revenue_yoy_growth 字段 < 0 的数量。共 ${data.length} 个${dim}，其中 ${declining} 个同比负增长`,
         type: declining === 0 ? 'positive' : declining > data.length * 0.5 ? 'negative' : 'warning',
-        route: { path: dimension === 'department' ? '/department-analysis' : '/product-analysis' },
+        route: { path: dimension === 'department' ? '/department-analysis' : dimension === 'customer' ? '/customer-analysis' : '/product-analysis' },
       });
 
       // 4. Negative margin (only if exists)
@@ -74,7 +74,7 @@ export function useInlineInsights(opts: {
           title: `${worst.dimension_value}${dim}毛利率为负 ${worst.gross_margin.toFixed(1)}%`,
           calculation: `计算方式：按各${dim}的 gross_margin 字段升序排列取最低值。${worst.dimension_value} 的 gross_margin = ${worst.gross_margin.toFixed(2)}%`,
           type: 'negative',
-          route: { path: dimension === 'department' ? '/analysis/department' : '/analysis/product', query: { entity: worst.dimension_value } },
+          route: { path: dimension === 'department' ? '/department-analysis' : dimension === 'customer' ? '/customer-analysis' : '/product-analysis', query: { entity: worst.dimension_value } },
         });
       }
 
@@ -86,7 +86,7 @@ export function useInlineInsights(opts: {
           title: `${fast.dimension_value}${dim}增速最快 ${(fast.revenue_yoy_growth ?? 0).toFixed(1)}%`,
           calculation: `计算方式：按各${dim}的 revenue_yoy_growth 字段降序排列取最高值。${fast.dimension_value} 的 revenue_yoy_growth = ${(fast.revenue_yoy_growth ?? 0).toFixed(2)}%`,
           type: 'positive',
-          route: { path: dimension === 'department' ? '/analysis/department' : '/analysis/product', query: { entity: fast.dimension_value } },
+          route: { path: dimension === 'department' ? '/department-analysis' : dimension === 'customer' ? '/customer-analysis' : '/product-analysis', query: { entity: fast.dimension_value } },
         });
       }
     }

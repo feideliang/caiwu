@@ -7,8 +7,8 @@
             <!-- Period dimension selector -->
             <a-select v-model:value="periodDimension" style="width: 120px" placeholder="周期维度">
               <a-select-option value="monthly">月度</a-select-option>
-              <a-select-option value="weekly">季度</a-select-option>
-              <a-select-option value="yearly">年累计</a-select-option>
+              <a-select-option value="quarterly">季度</a-select-option>
+              <a-select-option value="cumulative">年累计</a-select-option>
               <a-select-option value="custom">自定义期间</a-select-option>
             </a-select>
             <!-- Period selector -->
@@ -57,8 +57,15 @@
               <KpiCard title="基期收入" :value="toWan(basePeriodData?.summary?.revenue)" unit="万元" :precision="2" />
             </a-col>
             <a-col :span="6">
-              <KpiCard title="收入变化" :value="metricsData?.summary?.revenue_yoy_growth || 0" unit="%" :precision="2"
-                :trend="metricsData?.summary?.revenue_yoy_growth" trendSuffix="%" />
+              <div class="change-card">
+                <div class="change-title">收入变化</div>
+                <div class="change-value">
+                  <span class="change-amount">{{ formatWan(revenueChangeValue, 2) }}万元</span>
+                </div>
+                <div class="change-rate" :class="revenueChangeRate >= 0 ? 'up' : 'down'">
+                  {{ revenueChangeRate >= 0 ? '+' : '' }}{{ revenueChangeRate?.toFixed(2) }}%
+                </div>
+              </div>
             </a-col>
             <a-col :span="6">
               <div class="impact-box">
@@ -84,8 +91,15 @@
               <KpiCard title="基期毛利额" :value="toWan(basePeriodData?.summary?.gross_profit)" unit="万元" :precision="2" />
             </a-col>
             <a-col :span="6">
-              <KpiCard title="毛利额变化" :value="metricsData?.summary?.gross_profit_yoy_growth || 0" unit="%" :precision="2"
-                :trend="metricsData?.summary?.gross_profit_yoy_growth" trendSuffix="%" />
+              <div class="change-card">
+                <div class="change-title">毛利额变化</div>
+                <div class="change-value">
+                  <span class="change-amount">{{ formatWan(profitChangeValue, 2) }}万元</span>
+                </div>
+                <div class="change-rate" :class="profitChangeRate >= 0 ? 'up' : 'down'">
+                  {{ profitChangeRate >= 0 ? '+' : '' }}{{ profitChangeRate?.toFixed(2) }}%
+                </div>
+              </div>
             </a-col>
             <a-col :span="6">
               <div class="impact-box">
@@ -115,12 +129,44 @@
                 :trend="marginChangePp" trendSuffix="pp" />
             </a-col>
             <a-col :span="4">
-              <KpiCard title="结构影响" :value="structureImpact" unit="pp" :precision="4" />
+              <KpiCard title="存续结构影响" :value="continuingStructureImpact" unit="pp" :precision="4" />
             </a-col>
             <a-col :span="4">
-              <KpiCard title="单因素毛利影响" :value="marginFactorImpact" unit="pp" :precision="4" />
+              <KpiCard title="存续毛利影响" :value="continuingMarginImpact" unit="pp" :precision="4" />
+            </a-col>
+            <a-col :span="4">
+              <KpiCard title="新增影响" :value="newImpact" unit="pp" :precision="4" />
+            </a-col>
+            <a-col :span="4">
+              <KpiCard title="退出影响" :value="exitImpact" unit="pp" :precision="4" />
             </a-col>
           </a-row>
+        </a-card>
+
+        <a-card title="毛利率变动拆解明细" size="small" class="section-card">
+          <a-table
+            :columns="marginAnalysisColumns"
+            :data-source="metricsData?.summary?.margin_change_analysis || []"
+            row-key="dimension_value"
+            size="small"
+            :pagination="{ pageSize: 10 }"
+            :scroll="{ x: 1200 }"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'category'">
+                {{ categoryLabel((record as any).category) }}
+              </template>
+              <template v-if="column.key === 'current_revenue' || column.key === 'base_revenue'">
+                {{ formatWan((record as any)[column.key], 2) }}万元
+              </template>
+              <template v-if="column.key === 'current_margin' || column.key === 'base_margin'">
+                {{ formatPercent((record as any)[column.key]) }}
+              </template>
+              <template v-if="column.key === 'structure_impact' || column.key === 'margin_impact' || column.key === 'total_impact'">
+                {{ formatPp((record as any)[column.key]) }}
+              </template>
+            </template>
+          </a-table>
         </a-card>
 
         <!-- Concentration ranking -->
@@ -144,7 +190,8 @@ import FinancialAssistantPanel from '@/components/ai/FinancialAssistantPanel.vue
 import { getCoreMetrics } from '@/api/metrics';
 import { getFilterOptions } from '@/api/filters';
 import type { CoreMetricsResponse } from '@/types/metrics';
-import { toWan } from '@/utils/format';
+import { formatPercent, formatPp, formatWan, toWan } from '@/utils/format';
+import { buildPeriodOptions, formatMonthValue, getComparePeriod, getDefaultPeriod, normalizePeriodDimension } from '@/utils/period';
 
 const isSmall = ref(window.innerWidth < 1024);
 function updateSize() { isSmall.value = window.innerWidth < 1024; }
@@ -153,7 +200,7 @@ onUnmounted(() => window.removeEventListener('resize', updateSize));
 const showAssistant = computed(() => !isSmall.value);
 
 // Filter state
-const periodDimension = ref<string>('yearly');
+const periodDimension = ref<string>('cumulative');
 const selectedPeriod = ref<string | undefined>();
 const compareBase = ref<string>('yoy');
 const dimension = ref<string>('customer');
@@ -171,61 +218,18 @@ const dimensionOptions = [
   { label: '公司整体', value: 'company' },
 ];
 
-// Derived period
 const period = computed(() => {
-  if (periodDimension.value === 'monthly') return selectedPeriod.value;
-  if (periodDimension.value === 'yearly') return selectedPeriod.value ? selectedPeriod.value.slice(0, 4) : undefined;
-  if (periodDimension.value === 'weekly') {
-    if (selectedPeriod.value && selectedPeriod.value.includes('-Q')) {
-      const [y, qStr] = selectedPeriod.value.split('-Q');
-      const q = parseInt(qStr);
-      return `${y}-${String(q * 3).padStart(2, '0')}`;
-    }
-    return selectedPeriod.value;
-  }
-  return undefined;
+  return periodDimension.value === 'custom' ? undefined : selectedPeriod.value;
 });
 
-// Dynamic period select options
 const periodSelectOptions = computed<Array<{ label: string; value: string }>>(() => {
-  if (periodDimension.value === 'weekly') {
-    const quarters = new Set<string>();
-    for (const p of allPeriods.value) {
-      if (p.includes('-')) {
-        const [y, m] = p.split('-');
-        const q = Math.ceil(parseInt(m) / 3);
-        quarters.add(`${y}-Q${q}`);
-      }
-    }
-    return [...quarters].sort().reverse().map((v) => ({ label: v, value: v }));
-  }
-  if (periodDimension.value === 'yearly') {
-    const years = new Set<string>();
-    for (const p of allPeriods.value) {
-      if (p.includes('-')) years.add(p.split('-')[0]);
-    }
-    return [...years].sort().reverse().map((y) => ({ label: `${y}年`, value: `${y}` }));
-  }
-  // monthly
-  const months = new Set<string>();
-  for (const p of allPeriods.value) {
-    if (p.includes('-')) months.add(`${p.split('-')[0]}-${p.split('-')[1]}`);
-  }
-  return [...months].sort().reverse().map((v) => {
-    const [y, m] = v.split('-');
-    return { label: `${y}年${parseInt(m)}月`, value: `${y}-${m}` };
-  });
+  return buildPeriodOptions(allPeriods.value, normalizePeriodDimension(periodDimension.value));
 });
 
 function onCustomRangeChange(dates: any) {
   if (dates && dates[0] && dates[1]) {
-    const fmt = (d: any) => {
-      const y = d.year?.() ?? d.getFullYear();
-      const mo = d.month?.() ?? (d.getMonth() + 1);
-      return `${y}-${String(mo + 1).padStart(2, '0')}`;
-    };
-    periodStart.value = fmt(dates[0]);
-    periodEnd.value = fmt(dates[1]);
+    periodStart.value = formatMonthValue(dates[0]);
+    periodEnd.value = formatMonthValue(dates[1]);
   } else {
     periodStart.value = undefined;
     periodEnd.value = undefined;
@@ -234,8 +238,7 @@ function onCustomRangeChange(dates: any) {
 
 // Auto-select first period when dimension changes
 watch(periodDimension, () => {
-  const opts = periodSelectOptions.value;
-  if (opts.length) selectedPeriod.value = opts[0].value;
+  selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
 });
 
 // Data
@@ -245,26 +248,7 @@ const loading = ref(false);
 
 // Compute base period for comparison
 const basePeriod = computed(() => {
-  if (!period.value) return undefined;
-  if (compareBase.value === 'yoy') {
-    // YoY: previous year same period
-    if (period.value.length >= 7) {
-      const y = parseInt(period.value.slice(0, 4));
-      const rest = period.value.slice(4);
-      return `${y - 1}${rest}`;
-    }
-    if (period.value.length === 4) return `${parseInt(period.value) - 1}`;
-  }
-  if (compareBase.value === 'mom') {
-    // MoM: previous month
-    if (period.value.length >= 7) {
-      const y = parseInt(period.value.slice(0, 4));
-      const m = parseInt(period.value.slice(5, 7));
-      if (m === 1) return `${y - 1}-12`;
-      return `${y}-${String(m - 1).padStart(2, '0')}`;
-    }
-  }
-  return undefined;
+  return getComparePeriod(period.value, compareBase.value, normalizePeriodDimension(periodDimension.value));
 });
 
 // Margin change in pp
@@ -274,19 +258,68 @@ const marginChangePp = computed(() => {
   return Math.round((curr - base) * 100) / 100;
 });
 
+// Absolute change values
+const revenueChangeValue = computed(() => {
+  const curr = metricsData.value?.summary?.revenue || 0;
+  const base = basePeriodData.value?.summary?.revenue;
+  if (curr == null || base == null) return 0;
+  return curr - base;
+});
+
+const profitChangeValue = computed(() => {
+  const curr = metricsData.value?.summary?.gross_profit;
+  const base = basePeriodData.value?.summary?.gross_profit;
+  if (curr == null || base == null) return 0;
+  return curr - base;
+});
+
+const revenueChangeRate = computed(() => {
+  return compareBase.value === 'mom'
+    ? (metricsData.value?.summary?.revenue_mom_growth || 0)
+    : (metricsData.value?.summary?.revenue_yoy_growth || 0);
+});
+
+const profitChangeRate = computed(() => {
+  return compareBase.value === 'mom'
+    ? (metricsData.value?.summary?.gross_profit_mom_growth || 0)
+    : (metricsData.value?.summary?.gross_profit_yoy_growth || 0);
+});
+
 // Structure and margin factor impact from margin_change_analysis
-const structureImpact = computed(() => {
-  const analysis = metricsData.value?.summary?.margin_change_analysis || [];
-  return Math.round(analysis.reduce((sum, a) => sum + (a.structure_impact || 0), 0) * 10000) / 10000;
+const continuingStructureImpact = computed(() => {
+  return metricsData.value?.summary?.margin_change_summary?.continuing_structure_impact || 0;
 });
-const marginFactorImpact = computed(() => {
-  const analysis = metricsData.value?.summary?.margin_change_analysis || [];
-  return Math.round(analysis.reduce((sum, a) => sum + (a.margin_impact || 0), 0) * 10000) / 10000;
+const continuingMarginImpact = computed(() => {
+  return metricsData.value?.summary?.margin_change_summary?.continuing_margin_impact || 0;
 });
+const newImpact = computed(() => {
+  return metricsData.value?.summary?.margin_change_summary?.new_impact || 0;
+});
+const exitImpact = computed(() => {
+  return metricsData.value?.summary?.margin_change_summary?.exit_impact || 0;
+});
+
+const marginAnalysisColumns = [
+  { title: '分类', key: 'category', width: 100 },
+  { title: '维度值', dataIndex: 'dimension_value', key: 'dimension_value', width: 180 },
+  { title: '当期收入', dataIndex: 'current_revenue', key: 'current_revenue', width: 120 },
+  { title: '基期收入', dataIndex: 'base_revenue', key: 'base_revenue', width: 120 },
+  { title: '当期毛利率', dataIndex: 'current_margin', key: 'current_margin', width: 120 },
+  { title: '基期毛利率', dataIndex: 'base_margin', key: 'base_margin', width: 120 },
+  { title: '结构影响', dataIndex: 'structure_impact', key: 'structure_impact', width: 120 },
+  { title: '毛利影响', dataIndex: 'margin_impact', key: 'margin_impact', width: 120 },
+  { title: '总影响', dataIndex: 'total_impact', key: 'total_impact', width: 120 },
+];
+
+function categoryLabel(category: string): string {
+  if (category === 'continuing') return '存续';
+  if (category === 'new') return '新增';
+  if (category === 'exit') return '退出';
+  return category;
+}
 
 // Top impacts for revenue/profit changes (explain 80% of change)
 const revenueTopImpacts = computed(() => {
-  if (dimension.value === 'customer') return []; // too many customers
   const breakdowns = metricsData.value?.breakdowns || [];
   const baseBreakdowns = basePeriodData.value?.breakdowns || [];
   const currTotal = metricsData.value?.summary?.revenue || 0;
@@ -327,6 +360,8 @@ const assistantContext = computed(() => ({
   period: period.value,
   dimension: dimension.value,
   period_dimension: periodDimension.value,
+  period_start: periodStart.value,
+  period_end: periodEnd.value,
   active_section: 'change_analysis',
 }));
 
@@ -338,6 +373,10 @@ async function fetchMetrics() {
       dimension: dimension.value,
       entity: dimension.value !== 'company' ? selectedEntity.value : undefined,
       period_dimension: periodDimension.value,
+      compare: compareBase.value,
+      compare_period: basePeriod.value,
+      period_start: periodStart.value,
+      period_end: periodEnd.value,
     });
     metricsData.value = resp.data as CoreMetricsResponse;
 
@@ -348,6 +387,9 @@ async function fetchMetrics() {
         dimension: dimension.value,
         entity: dimension.value !== 'company' ? selectedEntity.value : undefined,
         period_dimension: periodDimension.value,
+        compare: compareBase.value,
+        period_start: periodStart.value,
+        period_end: periodEnd.value,
       });
       basePeriodData.value = baseResp.data as CoreMetricsResponse;
     } else {
@@ -366,7 +408,7 @@ async function fetchOptions() {
   const periods = ((periodResp.data as any)?.options || []) as string[];
   allPeriods.value = periods;
   if (!selectedPeriod.value && periods.length) {
-    selectedPeriod.value = periodDimension.value === 'yearly' ? periods[periods.length - 1].slice(0, 4) : periods[periods.length - 1];
+    selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
   }
 }
 
@@ -384,7 +426,7 @@ async function loadEntityOptions() {
 
 function refresh() { fetchMetrics(); }
 
-watch([periodDimension, selectedPeriod, dimension], async () => {
+watch([periodDimension, selectedPeriod, dimension, periodStart, periodEnd], async () => {
   await loadEntityOptions();
   fetchMetrics();
 });
@@ -471,6 +513,34 @@ onMounted(async () => { await fetchOptions(); await fetchMetrics(); });
   .impact-empty {
     font-size: 13px;
     color: var(--color-text-secondary);
+  }
+}
+
+// Change card styles
+.change-card {
+  padding: 12px;
+  background: var(--color-bg-layout);
+  border-radius: 8px;
+  .change-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin-bottom: 4px;
+  }
+  .change-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--color-text);
+    margin-bottom: 4px;
+    .change-amount {
+      font-size: 18px;
+    }
+  }
+  .change-rate {
+    font-size: 14px;
+    font-weight: 600;
+    &.up { color: #f5222d; }
+    &.down { color: #52c41a; }
   }
 }
 

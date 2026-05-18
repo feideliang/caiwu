@@ -281,7 +281,7 @@ _KNOWLEDGE_BASE_RULES = (
     "亏损产品占比 = 毛利率为负的产品数 / 总产品数 × 100%\n"
     "高毛利订单占比 = 毛利率 > 40% 的订单数 / 总订单数 × 100%\n"
     "同比增长率 = (本期 - 去年同期) / 去年同期 × 100%\n"
-    "毛利率变化拆解(每个维度)：结构影响 = (当期收入占比 - 基期收入占比) × 基期毛利率 / 100；毛利变化影响 = 当期收入占比 × (当期毛利率 - 基期毛利率) / 100；合计 = 结构影响 + 毛利变化影响\n"
+    "毛利率变化拆解(每个维度)：结构影响 = (当期收入占比 - 基期收入占比) × (当期毛利率 - 公司基期整体毛利率) / 100；毛利变化影响 = 基期收入占比 × (当期毛利率 - 基期毛利率) / 100；合计 = 结构影响 + 毛利变化影响\n"
     "收入/毛利额变动影响：各维度(当期值 - 基期值) / 总变化绝对值，累计贡献80%的为主要变动因素\n"
 
     # ── 异常阈值 ──
@@ -321,7 +321,7 @@ _KNOWLEDGE_BASE_RULES = (
     "订单维度：order_id(订单编号), contract_no(合同编号), order_header_type(订单头类型), order_category(订单分类), sales_type(内销/外销)\n"
     "地理维度：province(省份), market_segment(细分市场), application_scenario(应用场合), project_name(项目名称)\n"
     "财务维度：currency(币种), exchange_rate(汇率), tax_rate(税率), order_qty(订单数量), unit_cost_ex_tax(不含税单位成本), unit_cost_incl_tax(含税单位成本)\n"
-    "期间维度：period(YYYY-MM格式), 支持月度/季度/年累计/自定义期间四种维度\n"
+    "期间维度：period 支持 monthly(月度, YYYY-MM)、quarterly(季度, YYYY-Qn)、cumulative(年累计至所选月, YYYY-MM)、custom(自定义期间)\n"
     "比较类型：yoy(同比,上年同期), mom(环比,上月), cumulative(累计)\n"
 
     # ── 分析页面业务逻辑 ──
@@ -334,7 +334,8 @@ _KNOWLEDGE_BASE_RULES = (
     "三大模块：收入变动、毛利额变动、毛利率变动，均对比基期(同期/上月)\n"
     "收入变动：当期收入/基期收入/变化比例 + 主要变动影响(各维度贡献累计80%的为主要因素)\n"
     "毛利额变动：当期毛利额/基期毛利额/变化比例 + 主要变动影响\n"
-    "毛利率变动：当期毛利率/基期毛利率/变化值(pp) + 结构影响 + 单因素毛利影响\n"
+    "毛利率变动：当期毛利率/基期毛利率/变化值(pp) + 存续结构影响 + 存续毛利影响 + 新增影响 + 退出影响\n"
+    "毛利率拆解规则：维度需区分存续/新增/退出；结构影响=(w1-w0)*(g1-G0)，毛利影响=w0*(g1-g0)；新增/退出缺失毛利率时用整体毛利率补基准\n"
     "集中度排名：收入/毛利额/毛利率三个指标并行展示维度排名\n"
 
     "--- 部门分析 ---\n"
@@ -613,6 +614,8 @@ async def ai_chat(
         period_compare_type=ctx.period_compare_type if ctx else None,
         period_dimension=ctx.period_dimension if ctx else None,
         period=ctx.period if ctx else None,
+        period_start=ctx.period_start if ctx else None,
+        period_end=ctx.period_end if ctx else None,
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )
@@ -621,6 +624,8 @@ async def ai_chat(
         period_compare_type=ctx.period_compare_type if ctx else None,
         period_dimension=ctx.period_dimension if ctx else None,
         period=ctx.period if ctx else None,
+        period_start=ctx.period_start if ctx else None,
+        period_end=ctx.period_end if ctx else None,
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )
@@ -716,6 +721,9 @@ async def ai_chat(
                 f"1. 必须基于提供的数据和规则回答，不得编造\n"
                 f"2. 中文回答，简洁专业\n"
                 f"3. 数据不足时明确说明\n"
+                f"4. 使用中文数字标题分段（一、二、三…）\n"
+                f"5. 每个标题下按行列出指标，格式尽量使用“指标名：数值（对比信息）”\n"
+                f"6. 异常、原因、建议分别成段，不要把所有内容挤成一段\n"
             )
 
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -804,6 +812,9 @@ def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_ite
         f"1. 必须基于提供的数据和规则回答，不得编造\n"
         f"2. 中文回答，简洁专业\n"
         f"3. 数据不足时明确说明\n"
+        f"4. 使用中文数字标题分段（一、二、三…）\n"
+        f"5. 每个标题下按行列出指标，格式尽量使用“指标名：数值（对比信息）”\n"
+        f"6. 异常、原因、建议分别成段，不要把所有内容挤成一段\n"
     )
     return prompt
 
@@ -865,6 +876,8 @@ async def ai_chat_stream(
         period_compare_type=ctx.period_compare_type if ctx else None,
         period_dimension=ctx.period_dimension if ctx else None,
         period=ctx.period if ctx else None,
+        period_start=ctx.period_start if ctx else None,
+        period_end=ctx.period_end if ctx else None,
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )
@@ -873,6 +886,8 @@ async def ai_chat_stream(
         period_compare_type=ctx.period_compare_type if ctx else None,
         period_dimension=ctx.period_dimension if ctx else None,
         period=ctx.period if ctx else None,
+        period_start=ctx.period_start if ctx else None,
+        period_end=ctx.period_end if ctx else None,
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )

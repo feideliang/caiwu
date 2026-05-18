@@ -5,8 +5,8 @@
       <a-space wrap>
         <a-select v-model:value="periodDimension" style="width: 120px" placeholder="周期维度">
           <a-select-option value="monthly">月度</a-select-option>
-          <a-select-option value="weekly">季度</a-select-option>
-          <a-select-option value="yearly">年累计</a-select-option>
+          <a-select-option value="quarterly">季度</a-select-option>
+          <a-select-option value="cumulative">年累计</a-select-option>
           <a-select-option value="custom">自定义期间</a-select-option>
         </a-select>
         <a-range-picker
@@ -53,12 +53,19 @@ import FinancialOverview from '@/components/dashboard/FinancialOverview.vue';
 import FinancialAssistantPanel from '@/components/ai/FinancialAssistantPanel.vue';
 import { getFilterOptions } from '@/api/filters';
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import {
+  buildPeriodOptions,
+  formatMonthValue,
+  getDefaultPeriod,
+  normalizePeriodDimension,
+  quarterEndMonth,
+} from '@/utils/period';
 
 const isSmall = ref(window.innerWidth < 1024);
 const loading = ref(false);
 
 // Filter state
-const periodDimension = ref<string>('monthly'); // monthly / weekly / yearly / custom
+const periodDimension = ref<string>('monthly');
 const selectedPeriod = ref<string | undefined>();
 const customRange = ref<[any, any] | null>(null);
 const periodStart = ref<string | undefined>();
@@ -71,118 +78,38 @@ const productOptions = ref<Array<{ label: string; value: string }>>([]);
 // Raw period list from backend
 const allPeriods = ref<string[]>([]);
 
-// Derived period for simple month filter (monthly mode)
-// For yearly mode, period is a year string like "2026"
 const period = computed(() => {
-  if (periodDimension.value === 'monthly') {
-    return selectedPeriod.value;
-  }
-  if (periodDimension.value === 'yearly') {
-    // Return year only for yearly mode
-    return selectedPeriod.value ? selectedPeriod.value.slice(0, 4) : undefined;
-  }
-  if (periodDimension.value === 'weekly') {
-    return undefined; // handled by periodStart/periodEnd
-  }
-  return undefined;
+  if (periodDimension.value === 'quarterly' && selectedPeriod.value) return quarterEndMonth(selectedPeriod.value);
+  return periodDimension.value === 'custom' ? undefined : selectedPeriod.value;
 });
 
-// Dynamic period select options based on dimension
 const periodSelectOptions = computed<Array<{ label: string; value: string }>>(() => {
-  if (periodDimension.value === 'weekly') {
-    // Generate week options from months: each month → ~4 weeks
-    const weeks: Array<{ label: string; value: string }> = [];
-    const monthSet = new Set<string>();
-    for (const p of allPeriods.value) {
-      if (p.includes('-')) {
-        const [y, m] = p.split('-');
-        monthSet.add(`${y}-${m}`);
-      }
-    }
-    for (const ym of [...monthSet].sort().reverse()) {
-      const [y, m] = ym.split('-');
-      const monthNum = parseInt(m);
-      // Each month generates 4 week slots
-      for (let w = 1; w <= 4; w++) {
-        const weekLabel = `${y}年${monthNum}月第${w}周`;
-        const weekValue = `${y}-W${(monthNum - 1) * 4 + w}`;
-        weeks.push({ label: weekLabel, value: weekValue });
-      }
-    }
-    return weeks;
-  }
-  if (periodDimension.value === 'yearly') {
-    // Year options only: "2026年" etc.
-    const years = new Set<string>();
-    for (const p of allPeriods.value) {
-      if (p.includes('-')) {
-        const y = p.split('-')[0];
-        years.add(y);
-      }
-    }
-    return [...years].sort().reverse().map((y) => ({ label: `${y}年`, value: `${y}` }));
-  }
-  // monthly: month options like "2026年1月"
-  const months = new Set<string>();
-  for (const p of allPeriods.value) {
-    if (p.includes('-')) {
-      const [y, m] = p.split('-');
-      months.add(`${y}-${m}`);
-    }
-  }
-  return [...months].sort().reverse().map((v) => {
-    const [y, m] = v.split('-');
-    return { label: `${y}年${parseInt(m)}月`, value: `${y}-${m.padStart(2, '0')}` };
-  });
+  return buildPeriodOptions(allPeriods.value, normalizePeriodDimension(periodDimension.value));
 });
 
 function onCustomRangeChange(dates: any) {
   if (dates && dates[0] && dates[1]) {
-    const fmt = (d: any) => {
-      if (!d) return '';
-      const y = d.year?.() ?? d.getFullYear();
-      const mo = d.month?.() ?? (d.getMonth() + 1);
-      return `${y}-${String(mo + 1).padStart(2, '0')}`;
-    };
-    periodStart.value = fmt(dates[0]);
-    periodEnd.value = fmt(dates[1]);
+    periodStart.value = formatMonthValue(dates[0]);
+    periodEnd.value = formatMonthValue(dates[1]);
   } else {
     periodStart.value = undefined;
     periodEnd.value = undefined;
   }
 }
 
-// Update periodStart/periodEnd when selectedPeriod changes
 watch([selectedPeriod, periodDimension], () => {
-  if (!selectedPeriod.value) {
+  if (periodDimension.value !== 'custom') {
     periodStart.value = undefined;
     periodEnd.value = undefined;
-    return;
   }
-  if (periodDimension.value === 'weekly') {
-    // Convert week value like "2026-W5" to a month range
-    const match = selectedPeriod.value.match(/^(\d{4})-W(\d+)$/);
-    if (match) {
-      const y = match[1];
-      const w = parseInt(match[2]);
-      const month = Math.min(12, Math.ceil(w / 4));
-      periodStart.value = `${y}-${String(month).padStart(2, '0')}`;
-      periodEnd.value = `${y}-${String(month).padStart(2, '0')}`;
-    }
-  } else if (periodDimension.value === 'monthly') {
-    periodStart.value = selectedPeriod.value;
+  if (!selectedPeriod.value && periodDimension.value !== 'custom') {
+    periodStart.value = undefined;
     periodEnd.value = undefined;
-  } else if (periodDimension.value === 'yearly') {
-    // Full year range: selectedPeriod is "2026"
-    const y = selectedPeriod.value.slice(0, 4);
-    periodStart.value = `${y}-01`;
-    periodEnd.value = `${y}-12`;
   }
 });
 
-// When dimension changes, reset period selection
 watch(periodDimension, () => {
-  selectedPeriod.value = periodSelectOptions.value.length ? periodSelectOptions.value[0].value : undefined;
+  selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
 });
 
 function updateSize() {
@@ -193,9 +120,11 @@ const showAssistant = computed(() => !isSmall.value);
 
 const assistantContext = computed(() => ({
   period: period.value,
+  period_dimension: periodDimension.value,
+  period_start: periodStart.value,
+  period_end: periodEnd.value,
   department: selectedMarketLine.value,
   product: selectedProduct.value,
-  period_dimension: periodDimension.value,
   active_section: 'overview' as string,
 }));
 
@@ -208,13 +137,7 @@ async function fetchFilterOptions() {
 
     // Default: select latest period
     if (!selectedPeriod.value && allPeriods.value.length) {
-      if (periodDimension.value === 'yearly') {
-        // Extract year from latest period
-        const latest = allPeriods.value[allPeriods.value.length - 1];
-        selectedPeriod.value = latest.includes('-') ? latest.slice(0, 4) : latest;
-      } else {
-        selectedPeriod.value = allPeriods.value[allPeriods.value.length - 1];
-      }
+      selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
     }
 
     // Market line options
