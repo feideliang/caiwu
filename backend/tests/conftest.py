@@ -120,7 +120,8 @@ async def seeded_db(db_session: AsyncSession) -> AsyncGenerator[AsyncSession, No
         username="test_admin",
         email="admin@test.com",
         password_hash=hash_password("testpass123"),
-        role_id=1,
+        role_id=1,  # admin
+        department=None,  # admin has no department restriction
     )
     db_session.add(user)
     await db_session.flush()
@@ -139,6 +140,68 @@ async def admin_client(seeded_db: AsyncSession) -> AsyncGenerator[AsyncClient, N
             resp = await ac.post(
                 "/api/v1/auth/login",
                 json={"username": "test_admin", "password": "testpass123"},
+            )
+            token = resp.json()["data"]["access_token"]
+            ac.headers["Authorization"] = f"Bearer {token}"
+            yield ac
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def analyst_cbg(seeded_db: AsyncSession) -> AsyncGenerator[AsyncSession, None]:
+    """seeded_db + an analyst user with department=CBG."""
+    user = User(
+        username="analyst_cbg",
+        email="analyst_cbg@test.com",
+        password_hash=hash_password("testpass123"),
+        role_id=2,  # analyst
+        department="CBG",
+    )
+    seeded_db.add(user)
+    await seeded_db.flush()
+    yield seeded_db
+
+
+@pytest_asyncio.fixture(scope="function")
+async def analyst_cbg_client(analyst_cbg: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """HTTP client with analyst_cbg JWT."""
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: analyst_cbg
+    transport = ASGITransport(app=app)
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.post(
+                "/api/v1/auth/login",
+                json={"username": "analyst_cbg", "password": "testpass123"},
+            )
+            token = resp.json()["data"]["access_token"]
+            ac.headers["Authorization"] = f"Bearer {token}"
+            yield ac
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def analyst_ebg_client(analyst_cbg: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """HTTP client with an EBG-department analyst JWT."""
+    user = User(
+        username="analyst_ebg",
+        email="analyst_ebg@test.com",
+        password_hash=hash_password("testpass123"),
+        role_id=2,
+        department="EBG",
+    )
+    analyst_cbg.add(user)
+    await analyst_cbg.flush()
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: analyst_cbg
+    transport = ASGITransport(app=app)
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.post(
+                "/api/v1/auth/login",
+                json={"username": "analyst_ebg", "password": "testpass123"},
             )
             token = resp.json()["data"]["access_token"]
             ac.headers["Authorization"] = f"Bearer {token}"
