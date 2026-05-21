@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ResourceNotFoundError
 from app.core.response import APIResponse
-from app.core.security import get_current_user, require_permission
+from app.core.security import get_current_user, get_data_scope_filter, TokenPayload, require_permission
 from app.db.session import get_db
 from app.schemas.query import QueryRequest, QueryResponse
 from app.models.core import (
@@ -75,6 +75,12 @@ async def execute_query(
 
     stmt = select(model)
 
+    # Apply department scope for financial_data table
+    if body.table == "financial_data" and isinstance(_user, TokenPayload):
+        scope_filter = get_data_scope_filter(_user, model)
+        if scope_filter is not True:
+            stmt = stmt.where(scope_filter)
+
     # Apply field selection
     if body.fields:
         cols = [getattr(model, f) for f in body.fields if hasattr(model, f)]
@@ -117,6 +123,11 @@ async def execute_query(
     from sqlalchemy import func
 
     count_stmt = select(func.count()).select_from(model)
+    # Apply department scope for financial_data count
+    if body.table == "financial_data" and isinstance(_user, TokenPayload):
+        scope_filter = get_data_scope_filter(_user, model)
+        if scope_filter is not True:
+            count_stmt = count_stmt.where(scope_filter)
     # Re-apply filters to count
     for f in body.filters:
         if not hasattr(model, f.field):

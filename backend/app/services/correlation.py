@@ -128,11 +128,14 @@ async def _fetch_metric_values(
     metric_name: str,
     period_start: str | None = None,
     period_end: str | None = None,
+    department: str | None = None,
 ) -> list[tuple[str, float]]:
     """Fetch time-series values for a metric from financial_data."""
     stmt = select(FinancialData.period, FinancialData.metric_value).where(
         FinancialData.metric_name == metric_name
     )
+    if department:
+        stmt = stmt.where(FinancialData.entity == department)
     if period_start:
         stmt = stmt.where(FinancialData.period >= period_start)
     if period_end:
@@ -219,10 +222,11 @@ async def analyze_correlation(
     period_start: str | None = None,
     period_end: str | None = None,
     request_ai_explanation: bool = False,
+    department: str | None = None,
 ) -> dict[str, Any]:
     """Run correlation analysis between two metrics and persist the result."""
-    data_a = await _fetch_metric_values(db, metric_a, period_start, period_end)
-    data_b = await _fetch_metric_values(db, metric_b, period_start, period_end)
+    data_a = await _fetch_metric_values(db, metric_a, period_start, period_end, department)
+    data_b = await _fetch_metric_values(db, metric_b, period_start, period_end, department)
 
     # Align on common periods
     periods_a = {p: v for p, v in data_a}

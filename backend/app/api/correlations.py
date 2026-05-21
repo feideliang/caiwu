@@ -42,6 +42,7 @@ async def analyze_correlation_endpoint(
         period_start=body.period_start,
         period_end=body.period_end,
         request_ai_explanation=body.request_ai_explanation,
+        department=user.department if user.role != "admin" and user.department else None,
     )
 
     # Audit log

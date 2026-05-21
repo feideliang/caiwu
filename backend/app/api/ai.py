@@ -120,6 +120,10 @@ async def ai_analyze(
         FinancialData.entity != "",
     ).group_by(FinancialData.metric_name, FinancialData.entity)
 
+    # Apply department scope
+    if _user and _user.role != "admin" and _user.department:
+        curr_stmt = curr_stmt.where(FinancialData.entity == _user.department)
+
     curr_result = await db.execute(curr_stmt)
     curr_rows = curr_result.all()
 
@@ -150,6 +154,10 @@ async def ai_analyze(
         FinancialData.entity.isnot(None),
         FinancialData.entity != "",
     ).group_by(FinancialData.metric_name, FinancialData.entity)
+
+    # Apply department scope
+    if _user and _user.role != "admin" and _user.department:
+        prev_stmt = prev_stmt.where(FinancialData.entity == _user.department)
 
     prev_result = await db.execute(prev_stmt)
     prev_rows = prev_result.all()
@@ -238,7 +246,7 @@ async def ai_analyze(
     # Fall back to rule-based if AI fails
     if not ai_analysis_text:
         direction = "增长" if total_change > 0 else "下降"
-        analysis_parts = [f"{period} {metric} 较上期({prev_period}){direction} {abs(total_change):.1f}%，"]
+        analysis_parts = [f"{period} {metric} 较上期({prev_period}){direction} {abs(total_change):.2f}%，"]
         if attribution:
             top_driver = attribution[0]
             analysis_parts.append(f"主要由 {top_driver['factor']} 驱动，贡献 {top_driver['contribution']}。")
@@ -281,7 +289,7 @@ _KNOWLEDGE_BASE_RULES = (
     "亏损产品占比 = 毛利率为负的产品数 / 总产品数 × 100%\n"
     "高毛利订单占比 = 毛利率 > 40% 的订单数 / 总订单数 × 100%\n"
     "同比增长率 = (本期 - 去年同期) / 去年同期 × 100%\n"
-    "毛利率变化拆解(每个维度)：结构影响 = (当期收入占比 - 基期收入占比) × (当期毛利率 - 公司基期整体毛利率) / 100；毛利变化影响 = 基期收入占比 × (当期毛利率 - 基期毛利率) / 100；合计 = 结构影响 + 毛利变化影响\n"
+    "毛利率变化拆解(每个维度)：结构影响 = (当期收入占比 - 基期收入占比) × 基期毛利率 / 100；毛利变化影响 = 当期收入占比 × (当期毛利率 - 基期毛利率) / 100；合计 = 结构影响 + 毛利变化影响\n"
     "收入/毛利额变动影响：各维度(当期值 - 基期值) / 总变化绝对值，累计贡献80%的为主要变动因素\n"
 
     # ── 异常阈值 ──
@@ -289,7 +297,7 @@ _KNOWLEDGE_BASE_RULES = (
     "毛利率 < 20%：一般异常，需纳入常规审视\n"
     "毛利率 < 10%：严重异常，必须立即启动下钻分析，排查定价失误、成本异常或特殊竞争性项目\n"
     "毛利率 > 60%：需分析确认是技术领先带来的溢价还是偶然性项目，判断成功模式是否可复制\n"
-    "单一客户销售收入占比 > 30%：触发客户集中度风险预警\n"
+    "单一客户销售收入占比 > 10%：触发客户集中度风险预警\n"
     "前三大客户集中度 > 60%：客户集中度过高，需关注\n"
     "单一产品系列毛利贡献占比 > 40%：触发产品集中度风险预警\n"
     "前三大产品线毛利集中度 > 70%：产品集中度过高，需培育第二增长曲线\n"
@@ -335,7 +343,7 @@ _KNOWLEDGE_BASE_RULES = (
     "收入变动：当期收入/基期收入/变化比例 + 主要变动影响(各维度贡献累计80%的为主要因素)\n"
     "毛利额变动：当期毛利额/基期毛利额/变化比例 + 主要变动影响\n"
     "毛利率变动：当期毛利率/基期毛利率/变化值(pp) + 存续结构影响 + 存续毛利影响 + 新增影响 + 退出影响\n"
-    "毛利率拆解规则：维度需区分存续/新增/退出；结构影响=(w1-w0)*(g1-G0)，毛利影响=w0*(g1-g0)；新增/退出缺失毛利率时用整体毛利率补基准\n"
+    "毛利率拆解规则：维度需区分存续/新增/退出；结构影响=(w1-w0)*g0，毛利影响=w1*(g1-g0)；新增/退出缺失毛利率时用整体毛利率补基准\n"
     "集中度排名：收入/毛利额/毛利率三个指标并行展示维度排名\n"
 
     "--- 部门分析 ---\n"
@@ -378,7 +386,7 @@ def _get_page_suggestions(
     active_section: str,
 ) -> list[str]:
     """Generate page-specific suggested questions based on current KPI data."""
-    gm = kpis.get("gross_margin", 0)
+    gm = (kpis.get("gross_margin") or 0)
     top_cust_share = kpis.get("top_customer_share", 0)
     rev_consec = kpis.get("revenue_consecutive_growth", 0)
     gp_consec = kpis.get("gross_profit_consecutive_growth", 0)
@@ -403,7 +411,7 @@ def _get_page_suggestions(
             "各部门增长趋势如何",
         ]
         if dept_items:
-            low_dept = min(dept_items, key=lambda x: x.get("gross_margin", 100))
+            low_dept = min(dept_items, key=lambda x: x.get("gross_margin") or 100)
             base[0:0] = [f"{low_dept['dimension_value']}毛利率为何偏低"]
     elif active_section == "product":
         base = [
@@ -425,7 +433,7 @@ def _get_page_suggestions(
     # Data-conditioned additions
     if gm and 0 < gm < 20 and "毛利率偏低原因分析" not in base:
         base.append("毛利率偏低原因分析")
-    if top_cust_share and top_cust_share > 30 and "客户集中度风险" not in base:
+    if top_cust_share and top_cust_share > 10 and "客户集中度风险" not in base:
         base.append("客户集中度风险如何应对")
     if (rev_consec or 0) >= 3 and "连续增长趋势总结" not in base:
         base.append("连续增长趋势总结")
@@ -453,21 +461,21 @@ def _build_bi_context(kpis: dict, dept_items: list[dict], prod_items: list[dict]
     # Overview
     k = kpis
     lines.append(f"\n【总览】")
-    lines.append(f"  营业收入：{k.get('revenue', 0):,.2f} 元")
-    lines.append(f"  毛利额：{k.get('gross_profit', 0):,.2f} 元")
-    lines.append(f"  毛利率：{k.get('gross_margin', 0):.2f}%")
-    lines.append(f"  达成率：{k.get('achievement_rate', 0):.2f}%")
-    lines.append(f"  收入环比：{k.get('revenue_mom_growth', 0):+.2f}%")
-    lines.append(f"  毛利环比：{k.get('profit_mom_growth', 0):+.2f}%")
+    lines.append(f"  营业收入：{(k.get('revenue') or 0):,.0f} 元")
+    lines.append(f"  毛利额：{(k.get('gross_profit') or 0):,.0f} 元")
+    lines.append(f"  毛利率：{(k.get('gross_margin') or 0):.2f}%")
+    lines.append(f"  达成率：{(k.get('achievement_rate') or 0):.2f}%")
+    lines.append(f"  收入环比：{(k.get('revenue_mom_growth') or 0):+.2f}%")
+    lines.append(f"  毛利环比：{(k.get('profit_mom_growth') or 0):+.2f}%")
 
     # Department breakdown
     if dept_items:
         lines.append(f"\n【部门维度】（按收入排序，Top {min(len(dept_items), 5)}）")
         for item in dept_items[:5]:
             lines.append(
-                f"  {item['dimension_value']}: 收入 {item.get('revenue', 0):,.2f}, "
-                f"毛利 {item.get('gross_profit', 0):,.2f}, "
-                f"毛利率 {item.get('gross_margin', 0):.2f}%"
+                f"  {item['dimension_value']}: 收入 {(item.get('revenue') or 0):,.0f}, "
+                f"毛利 {(item.get('gross_profit') or 0):,.0f}, "
+                f"毛利率 {(item.get('gross_margin') or 0):.2f}%"
             )
 
     # Product breakdown
@@ -475,10 +483,10 @@ def _build_bi_context(kpis: dict, dept_items: list[dict], prod_items: list[dict]
         lines.append(f"\n【产品维度】（按毛利贡献排序，Top {min(len(prod_items), 5)}）")
         for item in prod_items[:5]:
             lines.append(
-                f"  {item['dimension_value']}: 收入 {item.get('revenue', 0):,.2f}, "
-                f"毛利 {item.get('gross_profit', 0):,.2f}, "
-                f"毛利率 {item.get('gross_margin', 0):.2f}%, "
-                f"贡献度 {item.get('gross_margin_contribution', 0):.2f}%"
+                f"  {item['dimension_value']}: 收入 {(item.get('revenue') or 0):,.0f}, "
+                f"毛利 {(item.get('gross_profit') or 0):,.0f}, "
+                f"毛利率 {(item.get('gross_margin') or 0):.2f}%, "
+                f"贡献度 {(item.get('gross_margin_contribution') or 0):.2f}%"
             )
 
     return "\n".join(lines)
@@ -492,12 +500,12 @@ def _generate_rule_based_answer(question: str, kpis: dict, dept_items: list[dict
 
     # Summary questions
     if any(kw in q for kw in ["总结", "经营情况", "概况", "overall"]):
-        rev = kpis.get('revenue', 0)
-        gp = kpis.get('gross_profit', 0)
-        gm = kpis.get('gross_margin', 0)
-        ach = kpis.get('achievement_rate', 0)
-        rev_growth = kpis.get('revenue_mom_growth', 0)
-        answer = f"本期经营概况：营业收入 {rev:,.2f} 元（环比 {rev_growth:+.2f}%），毛利额 {gp:,.2f} 元，毛利率 {gm:.2f}%，达成率 {ach:.2f}%。"
+        rev = (kpis.get('revenue') or 0)
+        gp = (kpis.get('gross_profit') or 0)
+        gm = (kpis.get('gross_margin') or 0)
+        ach = (kpis.get('achievement_rate') or 0)
+        rev_growth = (kpis.get('revenue_mom_growth') or 0)
+        answer = f"本期经营概况：营业收入 {rev:,.0f} 元（环比 {rev_growth:+.2f}%），毛利额 {gp:,.0f} 元，毛利率 {gm:.2f}%，达成率 {ach:.2f}%。"
         if 0 < gm < 20:
             answer += f"毛利率低于20%一般异常阈值，建议进一步分析。"
         elif 0 < gm < 10:
@@ -515,9 +523,9 @@ def _generate_rule_based_answer(question: str, kpis: dict, dept_items: list[dict
 
     # Gross margin questions
     if any(kw in q for kw in ["毛利率", "gross margin", "margin"]):
-        gm = kpis.get('gross_margin', 0)
-        rev_growth = kpis.get('revenue_mom_growth', 0)
-        gp_growth = kpis.get('profit_mom_growth', 0)
+        gm = (kpis.get('gross_margin') or 0)
+        rev_growth = (kpis.get('revenue_mom_growth') or 0)
+        gp_growth = (kpis.get('profit_mom_growth') or 0)
         gm_alert = ""
         if 0 < gm < 10:
             gm_alert = f"（低于10%严重异常线，必须下钻分析）"
@@ -528,9 +536,9 @@ def _generate_rule_based_answer(question: str, kpis: dict, dept_items: list[dict
 
         if dept_items:
             top_dept = dept_items[0]
-            low_dept = min(dept_items, key=lambda x: x.get('gross_margin', 100))
+            low_dept = min(dept_items, key=lambda x: x.get('gross_margin') or 100)
             return {
-                "answer": f"当前整体毛利率 {gm:.2f}%{gm_alert}。收入环比 {rev_growth:+.2f}%，毛利环比 {gp_growth:+.2f}%。部门中 {top_dept['dimension_value']} 收入最高（{top_dept.get('revenue', 0):,.2f} 元），{low_dept['dimension_value']} 毛利率最低（{low_dept.get('gross_margin', 0):.2f}%）。",
+                "answer": f"当前整体毛利率 {gm:.2f}%{gm_alert}。收入环比 {rev_growth:+.2f}%，毛利环比 {gp_growth:+.2f}%。部门中 {top_dept['dimension_value']} 收入最高（{(top_dept.get('revenue') or 0):,.0f} 元），{low_dept['dimension_value']} 毛利率最低（{(low_dept.get('gross_margin') or 0):.2f}%）。",
                 "suggestions": suggestions,
                 "references": [
                     {"type": "metric", "label": "毛利率", "value": gm},
@@ -548,11 +556,11 @@ def _generate_rule_based_answer(question: str, kpis: dict, dept_items: list[dict
         if dept_items:
             top = dept_items[0]
             return {
-                "answer": f"收入最高的部门是 {top['dimension_value']}，收入 {top.get('revenue', 0):,.2f} 元，毛利率 {top.get('gross_margin', 0):.2f}%。",
+                "answer": f"收入最高的部门是 {top['dimension_value']}，收入 {(top.get('revenue') or 0):,.0f} 元，毛利率 {(top.get('gross_margin') or 0):.2f}%。",
                 "suggestions": suggestions,
                 "references": [
                     {"type": "dimension", "label": "最高收入部门", "value": top['dimension_value']},
-                    {"type": "metric", "label": "部门收入", "value": top.get('revenue', 0)},
+                    {"type": "metric", "label": "部门收入", "value": (top.get('revenue') or 0)},
                 ],
             }
         return {
@@ -564,15 +572,15 @@ def _generate_rule_based_answer(question: str, kpis: dict, dept_items: list[dict
     # Product line risk questions
     if any(kw in q for kw in ["产品", "product", "风险", "最低"]):
         if prod_items:
-            low = min(prod_items, key=lambda x: x.get('gross_margin', 100))
+            low = min(prod_items, key=lambda x: x.get('gross_margin') or 100)
             top_contrib = prod_items[0] if prod_items else None
             return {
-                "answer": f"毛利率最低的产品线是 {low['dimension_value']}（{low.get('gross_margin', 0):.2f}%）。" +
-                          (f"毛利贡献最高的产品线是 {top_contrib['dimension_value']}（贡献 {top_contrib.get('gross_margin_contribution', 0):.2f}%）。" if top_contrib else ""),
+                "answer": f"毛利率最低的产品线是 {low['dimension_value']}（{(low.get('gross_margin') or 0):.2f}%）。" +
+                          (f"毛利贡献最高的产品线是 {top_contrib['dimension_value']}（贡献 {(top_contrib.get('gross_margin_contribution') or 0):.2f}%）。" if top_contrib else ""),
                 "suggestions": suggestions,
                 "references": [
                     {"type": "dimension", "label": "最低毛利率产品线", "value": low['dimension_value']},
-                    {"type": "metric", "label": "最低毛利率", "value": low.get('gross_margin', 0)},
+                    {"type": "metric", "label": "最低毛利率", "value": (low.get('gross_margin') or 0)},
                 ],
             }
         return {
@@ -583,11 +591,11 @@ def _generate_rule_based_answer(question: str, kpis: dict, dept_items: list[dict
 
     # Default fallback
     return {
-        "answer": f"关于'{question}'，当前页面数据显示：营业收入 {kpis.get('revenue', 0):,.2f} 元，毛利率 {kpis.get('gross_margin', 0):.2f}%。如需更深入分析，请使用推荐的常见问题。",
+        "answer": f"关于'{question}'，当前页面数据显示：营业收入 {(kpis.get('revenue') or 0):,.0f} 元，毛利率 {(kpis.get('gross_margin') or 0):.2f}%。如需更深入分析，请使用推荐的常见问题。",
         "suggestions": suggestions,
         "references": [
-            {"type": "metric", "label": "营业收入", "value": kpis.get('revenue', 0)},
-            {"type": "metric", "label": "毛利率", "value": kpis.get('gross_margin', 0)},
+            {"type": "metric", "label": "营业收入", "value": (kpis.get('revenue') or 0)},
+            {"type": "metric", "label": "毛利率", "value": (kpis.get('gross_margin') or 0)},
         ],
     }
 
@@ -691,20 +699,33 @@ async def ai_chat(
             ])
 
             if is_financial_question:
-                # Only inject dimension breakdowns when the question mentions them
-                need_dept = any(kw in body.question for kw in ["部门", "销售", "CBG", "EBG", "TBU", "SBG"])
-                need_prod = any(kw in body.question for kw in ["产品", "系列", "物料"])
-
-                # Build concise data section
+                # Build concise data section with all available data
                 data_lines = []
                 k = kpis
-                data_lines.append(f"营业收入: {k.get('revenue', 0):,.0f}元, 毛利率: {k.get('gross_margin', 0):.1f}%, 毛利额: {k.get('gross_profit', 0):,.0f}元")
-                data_lines.append(f"达成率: {k.get('achievement_rate', 0):.0f}%, 收入环比: {k.get('revenue_mom_growth', 0):+.1f}%")
-                if need_dept and dept_items:
-                    data_lines.append("部门: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue',0):,.0f}毛利率{d.get('gross_margin',0):.1f}%" for d in dept_items[:5]))
-                if need_prod and prod_items:
-                    data_lines.append("产品: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue',0):,.0f}毛利率{d.get('gross_margin',0):.1f}%" for d in prod_items[:5]))
+                rev = k.get("revenue") or 0
+                gp = k.get("gross_profit") or 0
+                gm = k.get("gross_margin") or 0
+                base_rev = k.get("base_revenue")
+                base_gp = k.get("base_gross_profit")
+                base_gm = k.get("base_gross_margin")
+                rev_yoy = k.get("revenue_yoy_growth")
+                gp_yoy = k.get("profit_yoy_growth")
+                gm_yoy_change = k.get("gross_margin_yoy_change")
+
+                data_lines.append(f"营业收入: {rev:,.0f}元, 毛利率: {gm:.2f}%, 毛利额: {gp:,.0f}元, 达成率: {(k.get('achievement_rate') or 0):.2f}%")
+                data_lines.append(f"收入环比: {(k.get('revenue_mom_growth') or 0):+.2f}%, 毛利环比: {(k.get('profit_mom_growth') or 0):+.2f}%")
+                if rev_yoy is not None:
+                    data_lines.append(f"收入同比: {rev_yoy:+.2f}%, 毛利同比: {gp_yoy:+.2f}%")
+                if base_rev is not None:
+                    data_lines.append(f"基期收入: {base_rev:,.0f}元, 基期毛利额: {base_gp:,.0f}元, 基期毛利率: {base_gm:.2f}%")
+                if gm_yoy_change is not None:
+                    data_lines.append(f"毛利率同比变化: {gm_yoy_change:+.2f}个百分点")
+                if dept_items:
+                    data_lines.append("部门: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in dept_items[:5]))
+                if prod_items:
+                    data_lines.append("产品: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in prod_items[:5]))
                 data_section = "当前数据: " + "。".join(data_lines) + "。"
+                data_section += "\n注意：请基于以上数据进行分析，不要编造数据。如果数据充分请给出具体分析，如果数据不足请说明具体缺少哪些维度的数据，避免笼统地说'无明细数据'。"
 
                 system_role = (
                     f"你是财务分析助手。基于以下数据和规则回答。\n\n"
@@ -741,8 +762,8 @@ async def ai_chat(
     active_section = body.context.active_section if body.context else ""
     suggestions = _get_page_suggestions(kpis, dept_items, prod_items, active_section)
     references = [
-        {"type": "metric", "label": "营业收入", "value": kpis.get("revenue", 0)},
-        {"type": "metric", "label": "毛利率", "value": kpis.get("gross_margin", 0)},
+        {"type": "metric", "label": "营业收入", "value": (kpis.get("revenue") or 0)},
+        {"type": "metric", "label": "毛利率", "value": (kpis.get("gross_margin") or 0)},
     ]
 
     return APIResponse.success(data={
@@ -780,18 +801,33 @@ def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_ite
     ])
 
     if is_financial_question:
-        need_dept = any(kw in body.question for kw in ["部门", "销售", "CBG", "EBG", "TBU", "SBG"])
-        need_prod = any(kw in body.question for kw in ["产品", "系列", "物料"])
-
+        # Build concise data section with all available data
         data_lines = []
         k = kpis
-        data_lines.append(f"营业收入: {k.get('revenue', 0)/10000:,.2f}万元, 毛利率: {k.get('gross_margin', 0):.1f}%, 毛利额: {k.get('gross_profit', 0)/10000:,.2f}万元")
-        data_lines.append(f"达成率: {k.get('achievement_rate', 0):.0f}%, 收入环比: {k.get('revenue_mom_growth', 0):+.1f}%")
-        if need_dept and dept_items:
-            data_lines.append("部门: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue',0)/10000:,.2f}万元毛利率{d.get('gross_margin',0):.1f}%" for d in dept_items[:5]))
-        if need_prod and prod_items:
-            data_lines.append("产品: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue',0)/10000:,.2f}万元毛利率{d.get('gross_margin',0):.1f}%" for d in prod_items[:5]))
+        rev = k.get("revenue") or 0
+        gp = k.get("gross_profit") or 0
+        gm = k.get("gross_margin") or 0
+        base_rev = k.get("base_revenue")
+        base_gp = k.get("base_gross_profit")
+        base_gm = k.get("base_gross_margin")
+        rev_yoy = k.get("revenue_yoy_growth")
+        gp_yoy = k.get("profit_yoy_growth")
+        gm_yoy_change = k.get("gross_margin_yoy_change")
+
+        data_lines.append(f"营业收入: {rev:,.0f}元, 毛利率: {gm:.2f}%, 毛利额: {gp:,.0f}元, 达成率: {(k.get('achievement_rate') or 0):.2f}%")
+        data_lines.append(f"收入环比: {(k.get('revenue_mom_growth') or 0):+.2f}%, 毛利环比: {(k.get('profit_mom_growth') or 0):+.2f}%")
+        if rev_yoy is not None:
+            data_lines.append(f"收入同比: {rev_yoy:+.2f}%, 毛利同比: {gp_yoy:+.2f}%")
+        if base_rev is not None:
+            data_lines.append(f"基期收入: {base_rev:,.0f}元, 基期毛利额: {base_gp:,.0f}元, 基期毛利率: {base_gm:.2f}%")
+        if gm_yoy_change is not None:
+            data_lines.append(f"毛利率同比变化: {gm_yoy_change:+.2f}个百分点")
+        if dept_items:
+            data_lines.append("部门: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in dept_items[:5]))
+        if prod_items:
+            data_lines.append("产品: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in prod_items[:5]))
         data_section = "当前数据: " + "。".join(data_lines) + "。"
+        data_section += "\n注意：请基于以上数据进行分析，不要编造数据。如果数据充分请给出具体分析，如果数据不足请说明具体缺少哪些维度的数据，避免笼统地说'无明细数据'。"
 
         system_role = (
             f"你是财务分析助手。基于以下数据和规则回答。\n\n"
@@ -924,8 +960,8 @@ async def ai_chat_stream(
         final = json.dumps({
             "suggestions": suggestions,
             "references": [
-                {"type": "metric", "label": "营业收入", "value": kpis.get("revenue", 0)},
-                {"type": "metric", "label": "毛利率", "value": kpis.get("gross_margin", 0)},
+                {"type": "metric", "label": "营业收入", "value": (kpis.get("revenue") or 0)},
+                {"type": "metric", "label": "毛利率", "value": (kpis.get("gross_margin") or 0)},
             ],
             "done": True,
         }, ensure_ascii=False)
