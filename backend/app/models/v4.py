@@ -35,6 +35,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(256), unique=True)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), nullable=False)
+    department: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
