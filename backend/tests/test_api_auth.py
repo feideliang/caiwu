@@ -91,3 +91,18 @@ class TestAuthAPI:
     async def test_empty_authorization(self, client: AsyncClient):
         resp = await client.get("/api/v1/auth/me")
         assert resp.status_code == 403
+
+    async def test_login_returns_department(self, seeded_db: AsyncSession, client: AsyncClient):
+        resp = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "test_admin", "password": "testpass123"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert "department" in data["user"]
+
+    async def test_me_returns_department(self, admin_client: AsyncClient):
+        resp = await admin_client.get("/api/v1/auth/me")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert "department" in data

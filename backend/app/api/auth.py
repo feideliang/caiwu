@@ -50,7 +50,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> APIRe
 
     token = create_access_token(
         subject=str(user.id),
-        extra={"role": user.role.name if user.role else "viewer"},
+        extra={"role": user.role.name if user.role else "viewer", "department": user.department},
     )
     return APIResponse.success(data={
         "access_token": token,
@@ -60,6 +60,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> APIRe
             "username": user.username,
             "email": user.email,
             "role": user.role.name if user.role else "viewer",
+            "department": user.department,
             "is_active": user.is_active,
         },
     })
@@ -83,6 +84,7 @@ async def get_me(
         username=user.username,
         email=user.email,
         role_name=user.role.name if user.role else "viewer",
+        department=user.department,
         is_active=user.is_active,
     )
     return APIResponse.success(data=data.model_dump())
@@ -125,6 +127,7 @@ async def create_user(
         email=body.email,
         password_hash=hash_password(body.password),
         role_id=body.role_id,
+        department=body.department,
     )
     db.add(user)
     await db.flush()
@@ -151,6 +154,7 @@ async def list_users(
             username=u.username,
             email=u.email,
             role_name=u.role.name if u.role else "viewer",
+            department=u.department,
             is_active=u.is_active,
         ).model_dump()
         for u in users
