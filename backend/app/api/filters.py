@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ResourceNotFoundError
 from app.core.response import APIResponse
-from app.core.security import get_current_user, TokenPayload
+from app.core.security import get_current_user, get_data_scope_filter, TokenPayload
 from app.db.session import get_db
 from app.models.core import FinancialData
 from app.models.v3 import FilterView
@@ -66,6 +66,9 @@ async def get_filter_options(
         if dimension in col_map:
             col = col_map[dimension]
             stmt = select(col).distinct().order_by(col)
+            scope_filter = get_data_scope_filter(user, FinancialData)
+            if scope_filter is not True:
+                stmt = stmt.where(scope_filter)
             if prefix:
                 stmt = stmt.where(col.like(f"{prefix}%"))
             result = await db.execute(stmt)
@@ -86,11 +89,19 @@ async def get_filter_options(
             # Use raw SQL tags->>'key' for distinct extraction (SQLAlchemy JSON column quirks)
             from sqlalchemy import text
             for key in keys:
-                sql = text(
-                    f"SELECT DISTINCT tags->>'{key}' FROM financial_data "
-                    f"WHERE tags IS NOT NULL AND tags->>'{key}' IS NOT NULL"
-                )
-                result = await db.execute(sql)
+                if user.role != "admin" and user.department:
+                    sql = text(
+                        f"SELECT DISTINCT tags->>'{key}' FROM financial_data "
+                        f"WHERE tags IS NOT NULL AND tags->>'{key}' IS NOT NULL "
+                        f"AND entity = :dept"
+                    )
+                    result = await db.execute(sql, {"dept": user.department})
+                else:
+                    sql = text(
+                        f"SELECT DISTINCT tags->>'{key}' FROM financial_data "
+                        f"WHERE tags IS NOT NULL AND tags->>'{key}' IS NOT NULL"
+                    )
+                    result = await db.execute(sql)
                 for row in result:
                     val = row[0]
                     if val:
