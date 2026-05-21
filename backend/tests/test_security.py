@@ -1,4 +1,4 @@
-"""Tests for JWT auth, RBAC guards, and security helpers."""
+"""Tests for JWT auth, RBAC guards, data-scope filter, and security helpers."""
 
 from __future__ import annotations
 
@@ -13,9 +13,11 @@ from app.core.security import (
     TokenPayload,
     require_role,
     require_permission,
+    get_data_scope_filter,
 )
 from app.config import settings
 from app.core.exceptions import AuthenticationError, ForbiddenError
+from sqlalchemy.sql.elements import BinaryExpression
 
 
 class TestPasswordHelpers:
@@ -138,3 +140,24 @@ class TestRBAC:
         user_admin = TokenPayload(sub="1", role="admin")
         result = dep(user_admin)
         assert result.role == "admin"
+
+
+class TestDataScopeFilter:
+    """Test the get_data_scope_filter helper that restricts data access by department."""
+
+    def test_admin_returns_true(self):
+        admin = TokenPayload(sub="1", role="admin")
+        result = get_data_scope_filter(admin)
+        assert result is True
+
+    def test_viewer_with_department_returns_filter(self):
+        viewer = TokenPayload(sub="2", role="viewer", department="CBG")
+        result = get_data_scope_filter(viewer)
+        assert result is not True
+        assert isinstance(result, BinaryExpression)
+        assert str(result.compile(compile_kwargs={"literal_binds": True})) == "financial_data.entity = 'CBG'"
+
+    def test_viewer_without_department_returns_true(self):
+        viewer = TokenPayload(sub="3", role="viewer", department=None)
+        result = get_data_scope_filter(viewer)
+        assert result is True

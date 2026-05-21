@@ -69,6 +69,7 @@ class TokenPayload(BaseModel):
     sub: str
     exp: datetime | None = None
     role: str = "viewer"
+    department: str | None = None
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(_security)) -> TokenPayload:
@@ -138,3 +139,17 @@ def apply_role_filter(query: Any, user_role: str, owner_col: str = "owner_id") -
 
     # For viewer/analyst, scope to owned records; caller passes current user id via bindparam
     return query  # caller should apply .where(... == current_user_id) externally
+
+
+def get_data_scope_filter(user: TokenPayload, model=None):
+    """Return a SQLAlchemy WHERE clause filtering by user's department.
+
+    Admin users (and users without a department assignment) get no filter (True).
+    Non-admin users are restricted to rows where ``model.entity == user.department``.
+    """
+    if user.role == "admin" or not user.department:
+        return True
+    if model is None:
+        from app.models.core import FinancialData
+        model = FinancialData
+    return model.entity == user.department
