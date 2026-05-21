@@ -20,6 +20,7 @@ class UserRead(BaseModel):
     username: str
     email: str | None
     role_name: str
+    department: str | None = None
     is_active: bool
 
     model_config = {"from_attributes": True}
@@ -30,12 +31,14 @@ class UserCreate(BaseModel):
     email: str | None = None
     password: str = Field(min_length=6, max_length=128)
     role_id: int = 3  # default viewer
+    department: str | None = None
 
 
 class UserUpdate(BaseModel):
     email: str | None = None
     is_active: bool | None = None
     role_id: int | None = None
+    department: str | None = None
 
 
 class RoleRead(BaseModel):
