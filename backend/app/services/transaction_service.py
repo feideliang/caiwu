@@ -14,6 +14,7 @@ class TransactionService:
     async def get_contracts(
         self, db: AsyncSession, period: str | None = None,
         entity: str | None = None, page: int = 1, page_size: int = 20,
+        department: str | None = None,
     ) -> tuple[list[dict], int]:
         stmt = select(
             FinancialData.entity,
@@ -29,6 +30,8 @@ class TransactionService:
             stmt = stmt.where(FinancialData.period == period)
         if entity:
             stmt = stmt.where(FinancialData.entity == entity)
+        if department:
+            stmt = stmt.where(FinancialData.entity == department)
         stmt = stmt.group_by(FinancialData.entity, FinancialData.period, FinancialData.metric_name)
 
         result = await db.execute(stmt)
@@ -58,6 +61,7 @@ class TransactionService:
         self, db: AsyncSession, period_from: str | None = None,
         period_to: str | None = None, min_value: float | None = None,
         page: int = 1, page_size: int = 20,
+        department: str | None = None,
     ) -> tuple[list[dict], int]:
         stmt = select(
             FinancialData.period,
@@ -66,6 +70,8 @@ class TransactionService:
         ).where(
             FinancialData.metric_name.in_(["revenue", "cost"]),
         )
+        if department:
+            stmt = stmt.where(FinancialData.entity == department)
         if period_from:
             stmt = stmt.where(FinancialData.period >= period_from)
         if period_to:
@@ -99,6 +105,7 @@ class TransactionService:
     async def get_projects(
         self, db: AsyncSession, entity: str | None = None,
         page: int = 1, page_size: int = 20,
+        department: str | None = None,
     ) -> tuple[list[dict], int]:
         stmt = select(
             FinancialData.entity,
@@ -113,6 +120,8 @@ class TransactionService:
         )
         if entity:
             stmt = stmt.where(FinancialData.entity == entity)
+        if department:
+            stmt = stmt.where(FinancialData.entity == department)
         stmt = stmt.group_by(FinancialData.entity, FinancialData.metric_name)
 
         result = await db.execute(stmt)
@@ -143,6 +152,7 @@ class TransactionService:
     async def detect_anomalies(
         self, db: AsyncSession, threshold: float = 2.0,
         metric_names: str | None = None, period: str | None = None,
+        department: str | None = None,
     ) -> list[dict]:
         stmt = select(
             FinancialData.metric_name,
@@ -150,6 +160,8 @@ class TransactionService:
             FinancialData.metric_value,
             FinancialData.entity,
         ).where(FinancialData.metric_value.isnot(None))
+        if department:
+            stmt = stmt.where(FinancialData.entity == department)
         if metric_names:
             names = [n.strip() for n in metric_names.split(",")]
             stmt = stmt.where(FinancialData.metric_name.in_(names))
@@ -197,6 +209,8 @@ class TransactionService:
             FinancialData.metric_name == "revenue",
             FinancialData.period.isnot(None),
         ).group_by(FinancialData.period)
+        if department:
+            margin_stmt = margin_stmt.where(FinancialData.entity == department)
         margin_result = await db.execute(margin_stmt)
         period_revenues = {r.period: float(r.revenue or 0) for r in margin_result.all()}
 
@@ -207,6 +221,8 @@ class TransactionService:
             FinancialData.metric_name == "cost",
             FinancialData.period.isnot(None),
         ).group_by(FinancialData.period)
+        if department:
+            cost_stmt = cost_stmt.where(FinancialData.entity == department)
         cost_result = await db.execute(cost_stmt)
         period_costs = {r.period: float(r.cost or 0) for r in cost_result.all()}
 
@@ -223,7 +239,7 @@ class TransactionService:
                     "period": prd,
                     "value": round(gm, 2),
                     "alert_level": "red",
-                    "message": f"毛利率{gm:.1f}% < 10%，严重预警",
+                    "message": f"毛利率{gm:.2f}% < 10%，严重预警",
                 })
             elif gm < 20:
                 anomalies.append({
@@ -231,7 +247,7 @@ class TransactionService:
                     "period": prd,
                     "value": round(gm, 2),
                     "alert_level": "yellow",
-                    "message": f"毛利率{gm:.1f}% < 20%，关注预警",
+                    "message": f"毛利率{gm:.2f}% < 20%，关注预警",
                 })
             elif gm > 60:
                 anomalies.append({
@@ -239,7 +255,7 @@ class TransactionService:
                     "period": prd,
                     "value": round(gm, 2),
                     "alert_level": "review",
-                    "message": f"毛利率{gm:.1f}% > 60%，需复核",
+                    "message": f"毛利率{gm:.2f}% > 60%，需复核",
                 })
 
         # 2. Consecutive growth check (3 consecutive periods of positive revenue growth)
@@ -265,6 +281,8 @@ class TransactionService:
             FinancialData.entity.isnot(None),
             FinancialData.entity != "",
         ).group_by(FinancialData.entity)
+        if department:
+            cust_stmt = cust_stmt.where(FinancialData.entity == department)
         cust_result = await db.execute(cust_stmt)
         customer_totals = {r.entity: float(r.total or 0) for r in cust_result.all()}
         total_revenue = sum(customer_totals.values())
@@ -278,7 +296,7 @@ class TransactionService:
                         "value": round(cust_rev, 2),
                         "alert_level": "yellow",
                         "entity": cust,
-                        "message": f"客户{cust}营收占比{ratio*100:.1f}% > 30%，集中度风险",
+                        "message": f"客户{cust}营收占比{ratio*100:.2f}% > 30%，集中度风险",
                     })
 
         anomalies.sort(key=lambda x: x.get("sigma_distance", 0), reverse=True)
@@ -287,13 +305,16 @@ class TransactionService:
     async def get_large_amounts(
         self, db: AsyncSession, threshold: float = 1000000,
         page: int = 1, page_size: int = 20,
+        department: str | None = None,
     ) -> tuple[list[dict], int]:
         stmt = select(
             FinancialData.metric_name, FinancialData.metric_value,
             FinancialData.period, FinancialData.entity,
         ).where(
             FinancialData.metric_value >= threshold,
-        ).order_by(FinancialData.metric_value.desc())
+        )
+        if department:
+            stmt = stmt.where(FinancialData.entity == department).order_by(FinancialData.metric_value.desc())
 
         total_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await db.execute(total_stmt)).scalar() or 0

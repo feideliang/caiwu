@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import APIResponse
-from app.core.security import get_current_user
+from app.core.security import TokenPayload, get_current_user
 from app.db.session import get_db
 from app.schemas.transactions import TransactionQueryParams
 from app.services.transaction_service import transaction_service
@@ -20,9 +20,12 @@ async def get_contracts(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
-    items, total = await transaction_service.get_contracts(db, period, entity, page, page_size)
+    effective_entity = entity
+    if user.role != "admin" and user.department:
+        effective_entity = user.department
+    items, total = await transaction_service.get_contracts(db, period, effective_entity, page, page_size)
     return APIResponse.success(data={"items": items, "total": total, "page": page, "page_size": page_size})
 
 
@@ -34,9 +37,10 @@ async def get_orders(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
-    items, total = await transaction_service.get_orders(db, period_from, period_to, min_value, page, page_size)
+    dept = user.department if (user.role != "admin" and user.department) else None
+    items, total = await transaction_service.get_orders(db, period_from, period_to, min_value, page, page_size, department=dept)
     return APIResponse.success(data={"items": items, "total": total, "page": page, "page_size": page_size})
 
 
@@ -46,9 +50,12 @@ async def get_projects(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
-    items, total = await transaction_service.get_projects(db, entity, page, page_size)
+    effective_entity = entity
+    if user.role != "admin" and user.department:
+        effective_entity = user.department
+    items, total = await transaction_service.get_projects(db, effective_entity, page, page_size)
     return APIResponse.success(data={"items": items, "total": total, "page": page, "page_size": page_size})
 
 
@@ -58,9 +65,10 @@ async def get_anomalies(
     metric_names: str | None = Query(None),
     period: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
-    items = await transaction_service.detect_anomalies(db, threshold, metric_names, period)
+    dept = user.department if (user.role != "admin" and user.department) else None
+    items = await transaction_service.detect_anomalies(db, threshold, metric_names, period, department=dept)
     return APIResponse.success(data=items)
 
 
@@ -70,7 +78,8 @@ async def get_large_amounts(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
-    items, total = await transaction_service.get_large_amounts(db, threshold, page, page_size)
+    dept = user.department if (user.role != "admin" and user.department) else None
+    items, total = await transaction_service.get_large_amounts(db, threshold, page, page_size, department=dept)
     return APIResponse.success(data={"items": items, "total": total, "page": page, "page_size": page_size})
