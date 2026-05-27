@@ -377,23 +377,55 @@ class MetricsService:
         direct_sign_rev = 0.0
         direct_sign_gp = 0.0
 
+        # Pre-import for IncomeMarginDetail queries (used by product filter paths)
+        from app.models.core import IncomeMarginDetail
+        imd_bgbu_cond = (
+            IncomeMarginDetail.bgbu == bgbu_filter
+            if bgbu_filter != "ALL"
+            else IncomeMarginDetail.bgbu != "ALL"
+        )
+
         if need_summary or need_trend:
-            ps_q = select(AggPeriodSummary).where(
-                AggPeriodSummary.period.in_(list(query_periods)),
-                AggPeriodSummary.bgbu == bgbu_filter,
-            )
-            ps_rows = (await db.execute(ps_q)).scalars().all()
-            for row in ps_rows:
-                p = row.period
-                period_bucket[p]["revenue"] += float(row.revenue or 0)
-                period_bucket[p]["cost"] += float(row.cost or 0)
-                period_bucket[p]["gross_profit"] += float(row.gross_profit or 0)
-                period_order_counts[p] = (period_order_counts.get(p, 0) + (row.order_count or 0))
-                if p in current_members:
-                    if need_summary:
-                        target_rev = (target_rev or 0) + float(row.target_revenue or 0)
-                        direct_sign_rev += float(row.direct_sign_revenue or 0)
-                        direct_sign_gp += float(row.direct_sign_gp or 0)
+            if product and (_is_company_dim or _is_dept_dim):
+                # Product filter at company/department level: IncomeMarginDetail has product field
+                ps_imd_q = (
+                    select(
+                        IncomeMarginDetail.period,
+                        func.sum(IncomeMarginDetail.revenue_amount).label("revenue"),
+                        func.sum(IncomeMarginDetail.cost_amount).label("cost"),
+                        func.sum(IncomeMarginDetail.gross_profit_amount).label("gross_profit"),
+                        func.count(func.distinct(IncomeMarginDetail.order_id)).label("order_count"),
+                    )
+                    .where(
+                        IncomeMarginDetail.period.in_(list(query_periods)),
+                        imd_bgbu_cond,
+                        IncomeMarginDetail.product_bgbu == product,
+                    )
+                    .group_by(IncomeMarginDetail.period)
+                )
+                for row in (await db.execute(ps_imd_q)).all():
+                    p = row[0]
+                    period_bucket[p]["revenue"] += float(row[1] or 0)
+                    period_bucket[p]["cost"] += float(row[2] or 0)
+                    period_bucket[p]["gross_profit"] += float(row[3] or 0)
+                    period_order_counts[p] = (period_order_counts.get(p, 0) + int(row[4] or 0))
+            else:
+                ps_q = select(AggPeriodSummary).where(
+                    AggPeriodSummary.period.in_(list(query_periods)),
+                    AggPeriodSummary.bgbu == bgbu_filter,
+                )
+                ps_rows = (await db.execute(ps_q)).scalars().all()
+                for row in ps_rows:
+                    p = row.period
+                    period_bucket[p]["revenue"] += float(row.revenue or 0)
+                    period_bucket[p]["cost"] += float(row.cost or 0)
+                    period_bucket[p]["gross_profit"] += float(row.gross_profit or 0)
+                    period_order_counts[p] = (period_order_counts.get(p, 0) + (row.order_count or 0))
+                    if p in current_members:
+                        if need_summary:
+                            target_rev = (target_rev or 0) + float(row.target_revenue or 0)
+                            direct_sign_rev += float(row.direct_sign_revenue or 0)
+                            direct_sign_gp += float(row.direct_sign_gp or 0)
 
         # ── 2. Dimension summary (replaces B2/B3/B4/B5/B7) ──
         # Map dimension parameter → dim_type in agg table
@@ -482,55 +514,95 @@ class MetricsService:
                         if bkt == 'revenue':
                             period_customer_rev[p][dv] += val
         elif (need_customer_bd or need_summary) and not _is_customer_dim:
-            total_q = (
-                select(AggDimensionSummary.period, func.sum(AggDimensionSummary.revenue))
-                .where(
-                    AggDimensionSummary.period.in_(list(detail_periods)),
-                    AggDimensionSummary.bgbu == bgbu_filter,
-                    AggDimensionSummary.dim_type == "customer",
+            if product:
+                # Product filter active: query customer revenue from IncomeMarginDetail
+                # which has both customer (superior_name) and product (product_bgbu) fields.
+                # AggDimensionSummary for customer doesn't have product linkage.
+                cust_imd_q = (
+                    select(
+                        IncomeMarginDetail.period,
+                        IncomeMarginDetail.superior_name,
+                        func.sum(IncomeMarginDetail.revenue_amount).label("revenue"),
+                        func.sum(IncomeMarginDetail.cost_amount).label("cost"),
+                        func.sum(IncomeMarginDetail.gross_profit_amount).label("gross_profit"),
+                    )
+                    .where(
+                        IncomeMarginDetail.period.in_(list(detail_periods)),
+                        imd_bgbu_cond,
+                        IncomeMarginDetail.product_bgbu == product,
+                        IncomeMarginDetail.superior_name.isnot(None),
+                    )
+                    .group_by(IncomeMarginDetail.period, IncomeMarginDetail.superior_name)
                 )
-                .group_by(AggDimensionSummary.period)
-            )
-            tq_rows = (await db.execute(total_q)).all()
-            for period_val, total_rev in tq_rows:
-                period_customer_rev[period_val]["__total__"] = float(total_rev or 0)
+                cust_imd_rows = (await db.execute(cust_imd_q)).all()
+                for row in cust_imd_rows:
+                    period_customer_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
+                    period_customer_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
+                    period_customer_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
+                    period_customer_rev[row[0]][row[1]] += float(row[2] or 0)
+                # Compute totals
+                total_q_imd = (
+                    select(IncomeMarginDetail.period, func.sum(IncomeMarginDetail.revenue_amount))
+                    .where(
+                        IncomeMarginDetail.period.in_(list(detail_periods)),
+                        imd_bgbu_cond,
+                        IncomeMarginDetail.product_bgbu == product,
+                        IncomeMarginDetail.superior_name.isnot(None),
+                    )
+                    .group_by(IncomeMarginDetail.period)
+                )
+                for period_val, total_rev in (await db.execute(total_q_imd)).all():
+                    period_customer_rev[period_val]["__total__"] = float(total_rev or 0)
+            else:
+                total_q = (
+                    select(AggDimensionSummary.period, func.sum(AggDimensionSummary.revenue))
+                    .where(
+                        AggDimensionSummary.period.in_(list(detail_periods)),
+                        AggDimensionSummary.bgbu == bgbu_filter,
+                        AggDimensionSummary.dim_type == "customer",
+                    )
+                    .group_by(AggDimensionSummary.period)
+                )
+                tq_rows = (await db.execute(total_q)).all()
+                for period_val, total_rev in tq_rows:
+                    period_customer_rev[period_val]["__total__"] = float(total_rev or 0)
 
-            # (2) Single query using ROW_NUMBER() window function for Top 30 per period
-            # Push the rn <= 30 filter into SQL via subquery to avoid fetching all rows
-            _CUST_LIMIT = 30
-            from sqlalchemy import over, func as sql_func
-            row_num = (
-                sql_func.row_number()
-                .over(
-                    partition_by=AggDimensionSummary.period,
-                    order_by=desc(AggDimensionSummary.revenue),
+                # (2) Single query using ROW_NUMBER() window function for Top 30 per period
+                # Push the rn <= 30 filter into SQL via subquery to avoid fetching all rows
+                _CUST_LIMIT = 30
+                from sqlalchemy import over, func as sql_func
+                row_num = (
+                    sql_func.row_number()
+                    .over(
+                        partition_by=AggDimensionSummary.period,
+                        order_by=desc(AggDimensionSummary.revenue),
+                    )
+                    .label("rn")
                 )
-                .label("rn")
-            )
-            # Subquery with window function
-            cust_subq = (
-                select(
-                    AggDimensionSummary.period,
-                    AggDimensionSummary.dim_value,
-                    AggDimensionSummary.revenue,
-                    AggDimensionSummary.cost,
-                    AggDimensionSummary.gross_profit,
-                    row_num,
-                )
-                .where(
-                    AggDimensionSummary.period.in_(list(detail_periods)),
-                    AggDimensionSummary.bgbu == bgbu_filter,
-                    AggDimensionSummary.dim_type == "customer",
-                )
-            ).subquery()
-            # Filter ranked results in SQL
-            top_cust_q = select(cust_subq).where(cust_subq.c.rn <= _CUST_LIMIT)
-            cust_rows = (await db.execute(top_cust_q)).all()
-            for row in cust_rows:
-                period_customer_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
-                period_customer_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
-                period_customer_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
-                period_customer_rev[row[0]][row[1]] += float(row[2] or 0)
+                # Subquery with window function
+                cust_subq = (
+                    select(
+                        AggDimensionSummary.period,
+                        AggDimensionSummary.dim_value,
+                        AggDimensionSummary.revenue,
+                        AggDimensionSummary.cost,
+                        AggDimensionSummary.gross_profit,
+                        row_num,
+                    )
+                    .where(
+                        AggDimensionSummary.period.in_(list(detail_periods)),
+                        AggDimensionSummary.bgbu == bgbu_filter,
+                        AggDimensionSummary.dim_type == "customer",
+                    )
+                ).subquery()
+                # Filter ranked results in SQL
+                top_cust_q = select(cust_subq).where(cust_subq.c.rn <= _CUST_LIMIT)
+                cust_rows = (await db.execute(top_cust_q)).all()
+                for row in cust_rows:
+                    period_customer_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
+                    period_customer_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
+                    period_customer_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
+                    period_customer_rev[row[0]][row[1]] += float(row[2] or 0)
 
         # Product data — needed for concentration metrics, product breakdown, or when dimension IS product
         # Skip for department dimension: concentration is company-level, product BD not relevant
@@ -711,7 +783,7 @@ class MetricsService:
 
         # ── Helper: aggregate from filtered dim buckets ──
         def _filtered_bucket_values(p: str | None) -> tuple[float | None, float | None, float | None]:
-            """Sum revenue/cost/gp across all dimension values in period_dim_bucket for a period."""
+            """Sum revenue/cost/gp across dimension values in period_dim_bucket, falling back to period_bucket."""
             if not p:
                 return None, None, None
             members = _period_members(p)
@@ -723,6 +795,21 @@ class MetricsService:
             has_data = False
             for m in members:
                 for bk in period_dim_bucket.get(m, {}).values():
+                    r = bk.get('revenue')
+                    c = bk.get('cost')
+                    g = bk.get('gross_profit')
+                    if r is not None:
+                        total_rev += r
+                        has_data = True
+                    if c is not None:
+                        total_cost += c
+                    if g is not None:
+                        total_gp += g
+            # Fallback: if period_dim_bucket is empty (company/department dim with product filter),
+            # use period_bucket which was populated from IncomeMarginDetail
+            if not has_data:
+                for m in members:
+                    bk = period_bucket.get(m, {})
                     r = bk.get('revenue')
                     c = bk.get('cost')
                     g = bk.get('gross_profit')
