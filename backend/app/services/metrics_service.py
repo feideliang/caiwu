@@ -215,7 +215,7 @@ class MetricsService:
 
         # ── Cache check: data updates once per day, cache 24h ──
         _sections_key = ",".join(sorted(sections)) if sections else "all"
-        _cache_key = f"metrics:core:{period}:{dimension}:{compare}:{period_dimension}:{product}:{department}:{customer}:{bgbu_filter}:{_sections_key}"
+        _cache_key = f"metrics:core:v2:{period}:{dimension}:{compare}:{period_dimension}:{product}:{department}:{customer}:{bgbu_filter}:{_sections_key}"
         try:
             _cached = await cache_get(_cache_key)
             if _cached is not None:
@@ -475,7 +475,6 @@ class MetricsService:
             lambda: defaultdict(lambda: defaultdict(float))
         )
         if _is_customer_dim:
-            # Bridge from period_dim_bucket when dimension IS customer
             for p, dim_bk in period_dim_bucket.items():
                 for dv, bk in dim_bk.items():
                     for bkt, val in bk.items():
@@ -483,7 +482,6 @@ class MetricsService:
                         if bkt == 'revenue':
                             period_customer_rev[p][dv] += val
         elif (need_customer_bd or need_summary) and not _is_customer_dim:
-            # (1) Single GROUP BY for total customer revenue per period
             total_q = (
                 select(AggDimensionSummary.period, func.sum(AggDimensionSummary.revenue))
                 .where(
@@ -493,7 +491,8 @@ class MetricsService:
                 )
                 .group_by(AggDimensionSummary.period)
             )
-            for period_val, total_rev in (await db.execute(total_q)).all():
+            tq_rows = (await db.execute(total_q)).all()
+            for period_val, total_rev in tq_rows:
                 period_customer_rev[period_val]["__total__"] = float(total_rev or 0)
 
             # (2) Single query using ROW_NUMBER() window function for Top 30 per period
