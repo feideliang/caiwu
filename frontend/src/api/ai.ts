@@ -107,6 +107,17 @@ export function getAIConfig() {
   return import('@/api/request').then(({ get }) => get<AIConfig>('/ai/config'));
 }
 
+import type { AnalysisRecommendationRequest, AnalysisRecommendations } from '@/types/analysis';
+
+export async function getAnalysisRecommendations(
+  data: AnalysisRecommendationRequest,
+) {
+  return post<APIResponse<AnalysisRecommendations>>(
+    '/ai/analysis-recommendations',
+    data,
+  );
+}
+
 /**
  * Stream chat via SSE. Calls onChunk for each token, onDone when complete.
  */
