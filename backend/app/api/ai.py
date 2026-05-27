@@ -27,6 +27,7 @@ from app.schemas.ai import (
     ChatContext,
     ChatReference,
 )
+from app.schemas.analysis import AnalysisRecommendationRequest
 from app.services.chart_recommend import recommend_charts, recommend_layout
 from app.config import settings
 
@@ -399,53 +400,59 @@ def _get_page_suggestions(
     dept_items: list[dict],
     prod_items: list[dict],
     active_section: str,
+    page_type: str | None = None,
+    customer_items: list[dict] | None = None,
 ) -> list[str]:
     """Generate page-specific suggested questions based on current KPI data."""
     gm = (kpis.get("gross_margin") or 0)
     top_cust_share = kpis.get("top_customer_share", 0)
     rev_consec = kpis.get("revenue_consecutive_growth", 0)
     gp_consec = kpis.get("gross_profit_consecutive_growth", 0)
+    cust_top10 = kpis.get("customer_concentration_top10", 0)
+    neg_margin_ratio = kpis.get("negative_margin_order_ratio", 0)
+    rev_yoy = kpis.get("revenue_yoy_growth")
+    gp_yoy = kpis.get("profit_yoy_growth")
+
+    # Map page_type to active_section if not provided
+    section = active_section or _page_type_to_section(page_type)
 
     base: list[str] = []
 
-    if active_section == "overview":
-        base = [
-            "总结本月经营情况",
-            "毛利率是否正常",
-            "哪些指标出现异常",
-        ]
-    elif active_section == "metrics":
-        base = [
-            "核心指标达标情况如何",
-            "毛利率变化的结构和率影响拆解",
-            "客户集中度风险如何",
-        ]
-    elif active_section == "department":
-        base = [
-            "哪个部门贡献最高",
-            "各部门增长趋势如何",
-        ]
+    if section == "overview":
+        base = ["总结本月经营情况", "毛利率是否正常", "哪些指标出现异常"]
+    elif section == "metrics":
+        base = ["核心指标达标情况如何", "毛利率变化的结构和率影响拆解", "客户集中度风险如何"]
+    elif section == "department":
+        base = ["哪个部门贡献最高", "各部门增长趋势如何"]
         if dept_items:
             low_dept = min(dept_items, key=lambda x: x.get("gross_margin") or 100)
             base[0:0] = [f"{low_dept['dimension_value']}毛利率为何偏低"]
-    elif active_section == "product":
-        base = [
-            "哪个产品线风险最大",
-            "产品毛利率变化原因",
-        ]
-    elif active_section == "trend":
-        base = [
-            "收入趋势是否可持续",
-            "环比波动是否异常",
-        ]
+    elif section == "product":
+        base = ["哪个产品线风险最大", "产品毛利率变化原因"]
+        if prod_items:
+            neg_prods = [p for p in prod_items if (p.get("gross_margin") or 100) < 0]
+            if neg_prods:
+                base.append(f"为什么{neg_prods[0]['dimension_value']}毛利为负")
+    elif section == "customer":
+        base = ["客户集中度风险如何", "高价值客户有哪些特征"]
+        if customer_items:
+            top_cust = customer_items[0] if customer_items else None
+            if top_cust and (top_cust.get("revenue_contribution") or 0) > 20:
+                base.append(f"{top_cust['dimension_value']}收入占比过高如何应对")
+    elif section == "trend":
+        base = ["收入趋势是否可持续", "环比波动是否异常"]
+        if rev_yoy is not None and rev_yoy < 0:
+            base.append("收入同比为何下滑")
+    elif section == "prediction":
+        base = ["未来3月收入预测", "现金流风险如何"]
+    elif section == "insights":
+        base = ["本月有哪些异常告警", "有哪些优化机会"]
+    elif section == "transaction":
+        base = ["本月有哪些大额异常订单", "合同执行情况如何"]
     else:
-        base = [
-            "总结本月经营情况",
-            "毛利率变化原因",
-            "哪个部门贡献最高",
-        ]
+        base = ["总结本月经营情况", "毛利率变化原因", "哪个部门贡献最高"]
 
-    # Data-conditioned additions
+    # Data-conditioned additions (page-agnostic)
     if gm and 0 < gm < 20 and "毛利率偏低原因分析" not in base:
         base.append("毛利率偏低原因分析")
     if top_cust_share and top_cust_share > 10 and "客户集中度风险" not in base:
@@ -454,8 +461,261 @@ def _get_page_suggestions(
         base.append("连续增长趋势总结")
     if (gp_consec or 0) >= 3 and "毛利增长驱动力是什么" not in base:
         base.append("毛利增长驱动力是什么")
+    if neg_margin_ratio and neg_margin_ratio > 10 and "负毛利订单" not in base:
+        base.append("负毛利订单为何这么多")
 
     return base[:5]
+
+
+def _page_type_to_section(page_type: str | None) -> str:
+    """Map frontend page_type to active_section for suggestion logic."""
+    mapping = {
+        "dashboard": "overview",
+        "core_metrics": "metrics",
+        "trend": "trend",
+        "department": "department",
+        "product": "product",
+        "customer": "customer",
+        "prediction": "prediction",
+        "insights": "insights",
+        "transaction": "transaction",
+    }
+    return mapping.get(page_type or "", "overview")
+
+
+def build_analysis_recommendations(
+    kpis: dict,
+    dept_items: list[dict],
+    prod_items: list[dict],
+    customer_items: list[dict],
+    page_type: str,
+    period: str | None = None,
+) -> dict:
+    """Build structured analysis recommendations for a specific page.
+
+    Returns a dict matching AnalysisRecommendationResponse fields.
+    """
+    from app.schemas.analysis import (
+        AnalysisRecommendationResponse,
+        MetricRecommendation,
+        AnomalyAlert,
+    )
+
+    gm = kpis.get("gross_margin") or 0
+    rev = kpis.get("revenue") or 0
+    gp = kpis.get("gross_profit") or 0
+    rev_yoy = kpis.get("revenue_yoy_growth")
+    gp_yoy = kpis.get("profit_yoy_growth")
+    cust_top10 = kpis.get("customer_concentration_top10") or 0
+    neg_margin_ratio = kpis.get("negative_margin_order_ratio") or 0
+    high_margin_ratio = kpis.get("high_margin_order_ratio")
+
+    metrics: list[MetricRecommendation] = []
+    anomalies: list[AnomalyAlert] = []
+    suggested_questions: list[str] = []
+    drill_down_path: list[str] = []
+
+    # ── Page-specific metric recommendations ──
+    if page_type == "dashboard":
+        metrics = [
+            MetricRecommendation(
+                metric_name="营业收入", metric_key="revenue",
+                description="本期总收入", current_value=rev / 1e4 if rev else None,
+                recommendation="关注收入规模及同比变化"
+            ),
+            MetricRecommendation(
+                metric_name="毛利率", metric_key="gross_margin",
+                description="毛利占收入比", current_value=gm,
+                benchmark=25.0,
+                status="critical" if 0 < gm < 10 else ("warning" if 0 < gm < 20 else "normal"),
+                recommendation="毛利率低于20%需重点关注" if 0 < gm < 20 else "毛利率处于正常水平"
+            ),
+            MetricRecommendation(
+                metric_name="客户集中度Top10", metric_key="customer_concentration_top10",
+                description="前10大客户收入占比", current_value=cust_top10,
+                benchmark=50.0,
+                status="warning" if cust_top10 > 60 else "normal",
+                recommendation="客户集中度偏高，建议关注风险" if cust_top10 > 60 else "客户分布健康"
+            ),
+        ]
+        drill_down_path = ["趋势分析", "部门分析", "产品分析"]
+
+    elif page_type == "trend":
+        metrics = [
+            MetricRecommendation(
+                metric_name="收入同比", metric_key="revenue_yoy_growth",
+                description="收入同比增长率", current_value=rev_yoy,
+                status="warning" if rev_yoy is not None and rev_yoy < 0 else "normal",
+                recommendation="收入同比下滑需深入分析" if rev_yoy is not None and rev_yoy < 0 else "收入增长趋势良好"
+            ),
+            MetricRecommendation(
+                metric_name="毛利额同比", metric_key="profit_yoy_growth",
+                description="毛利额同比增长率", current_value=gp_yoy,
+                recommendation="毛利增长与收入增长是否匹配"
+            ),
+            MetricRecommendation(
+                metric_name="毛利率变动", metric_key="gross_margin_yoy_change",
+                description="毛利率同比变化(百分点)",
+                current_value=kpis.get("gross_margin_yoy_change"),
+                recommendation="关注毛利率持续下滑趋势"
+            ),
+        ]
+        drill_down_path = ["部门维度趋势", "产品维度趋势"]
+
+    elif page_type == "department":
+        metrics = [
+            MetricRecommendation(
+                metric_name="部门收入贡献", metric_key="department_revenue",
+                description="各部门收入拆解",
+                recommendation="关注收入贡献最高的部门"
+            ),
+            MetricRecommendation(
+                metric_name="负毛利部门", metric_key="negative_margin_department",
+                description="是否存在负毛利部门",
+                status="warning" if any((d.get("gross_margin") or 100) < 0 for d in dept_items) else "normal",
+                recommendation="有部门毛利为负需立即关注"
+            ),
+        ]
+        if dept_items:
+            for d in dept_items[:3]:
+                if (d.get("gross_margin") or 100) < 0:
+                    suggested_questions.append(f"为什么{d['dimension_value']}毛利为负")
+        drill_down_path = ["客户维度", "产品维度"]
+
+    elif page_type == "product":
+        metrics = [
+            MetricRecommendation(
+                metric_name="产品线毛利率", metric_key="product_gross_margin",
+                description="各产品线盈利能力",
+                recommendation="关注低毛利产品线"
+            ),
+            MetricRecommendation(
+                metric_name="负毛利产品占比", metric_key="negative_margin_product_ratio",
+                description="负毛利产品数量占比",
+                current_value=kpis.get("negative_margin_product_ratio"),
+                status="warning" if (kpis.get("negative_margin_product_ratio") or 0) > 10 else "normal",
+            ),
+        ]
+        if prod_items:
+            for p in prod_items[:3]:
+                if (p.get("gross_margin") or 100) < 0:
+                    suggested_questions.append(f"为什么{p['dimension_value']}毛利为负")
+        drill_down_path = ["销售产品下钻", "客户维度"]
+
+    elif page_type == "customer":
+        metrics = [
+            MetricRecommendation(
+                metric_name="客户集中度", metric_key="customer_concentration",
+                description="客户收入集中度",
+                current_value=cust_top10,
+                benchmark=50.0,
+                status="warning" if cust_top10 > 60 else "normal",
+            ),
+            MetricRecommendation(
+                metric_name="单客户最高占比", metric_key="top_customer_share",
+                description="单一最大客户收入占比",
+                current_value=kpis.get("top_customer_share"),
+                benchmark=30.0,
+                status="critical" if (kpis.get("top_customer_share") or 0) > 30 else "normal",
+            ),
+        ]
+        if customer_items and customer_items[0].get("revenue_contribution", 0) > 20:
+            suggested_questions.append(f"{customer_items[0]['dimension_value']}占比过高是否有风险")
+        drill_down_path = ["销售产品维度", "合同类型"]
+
+    elif page_type == "core_metrics":
+        metrics = [
+            MetricRecommendation(
+                metric_name="高毛利订单占比", metric_key="high_margin_order_ratio",
+                description="毛利率>40%的订单比例",
+                current_value=high_margin_ratio,
+                benchmark=50.0,
+                recommendation="高毛利订单占比反映业务质量"
+            ),
+            MetricRecommendation(
+                metric_name="负毛利订单占比", metric_key="negative_margin_order_ratio",
+                description="毛利为负的订单比例",
+                current_value=neg_margin_ratio,
+                status="warning" if neg_margin_ratio > 10 else "normal",
+            ),
+        ]
+        drill_down_path = ["交易明细", "异常订单"]
+
+    elif page_type == "insights":
+        metrics = [
+            MetricRecommendation(
+                metric_name="异常告警", metric_key="anomaly_alerts",
+                description="系统检测到的异常指标",
+                recommendation="查看并处理所有未读告警"
+            ),
+        ]
+        drill_down_path = ["关联分析", "交易分析"]
+
+    elif page_type == "prediction":
+        metrics = [
+            MetricRecommendation(
+                metric_name="收入预测", metric_key="revenue_prediction",
+                description="未来3个月收入预测",
+                recommendation="关注预测与实际偏差"
+            ),
+            MetricRecommendation(
+                metric_name="DSO预测", metric_key="dso_prediction",
+                description="应收账款周转天数预测",
+                recommendation="DSO上升预示回款风险"
+            ),
+        ]
+        drill_down_path = ["历史预测准确性", "影响因子"]
+
+    # ── Anomaly detection (applies to all pages) ──
+    if 0 < gm < 10:
+        anomalies.append(AnomalyAlert(
+            metric="毛利率", severity="high",
+            message=f"毛利率仅{gm:.1f}%，低于10%严重异常阈值，需立即下钻分析",
+            value=gm, threshold=10.0
+        ))
+    elif 0 < gm < 20:
+        anomalies.append(AnomalyAlert(
+            metric="毛利率", severity="medium",
+            message=f"毛利率{gm:.1f}%，低于20%预警线，建议关注",
+            value=gm, threshold=20.0
+        ))
+    if rev_yoy is not None and rev_yoy < -10:
+        anomalies.append(AnomalyAlert(
+            metric="收入同比", severity="high",
+            message=f"收入同比下降{abs(rev_yoy):.1f}%，降幅较大",
+            value=rev_yoy, threshold=-10.0
+        ))
+    if neg_margin_ratio > 15:
+        anomalies.append(AnomalyAlert(
+            metric="负毛利订单占比", severity="medium",
+            message=f"负毛利订单占比{neg_margin_ratio:.1f}%，比例偏高",
+            value=neg_margin_ratio, threshold=15.0
+        ))
+
+    # ── Suggested questions ──
+    if not suggested_questions:
+        suggested_questions = _get_page_suggestions(
+            kpis, dept_items, prod_items, "", page_type=page_type
+        )
+
+    # ── Summary ──
+    if anomalies:
+        summary = f"检测到 {len(anomalies)} 项异常，建议优先处理"
+    elif gm > 30:
+        summary = "整体盈利能力良好，可关注增长机会"
+    elif rev_yoy is not None and rev_yoy > 10:
+        summary = "收入增长良好，建议分析增长驱动因素"
+    else:
+        summary = "建议关注核心指标变化趋势"
+
+    return {
+        "page_type": page_type,
+        "summary": summary,
+        "metrics": [m.model_dump() for m in metrics],
+        "suggested_questions": suggested_questions[:5],
+        "anomalies": [a.model_dump() for a in anomalies],
+        "drill_down_path": drill_down_path,
+    }
 
 
 _REVENUE_KW = ("revenue", "营业收入", "sales")
@@ -652,6 +912,25 @@ async def ai_chat(
     )
     # Skip expensive breakdown query — prompt only needs summary KPIs + RAG rules
     dept_items, prod_items = [], []
+
+    # Fetch customer breakdown for customer-focused pages
+    customer_items = []
+    active_section = body.context.active_section if body.context else ""
+    page_type_hint = body.context.page_type if hasattr(body.context, 'page_type') and body.context.page_type else ""
+    if active_section in ("customer", "overview") or page_type_hint == "customer":
+        from app.db.session import async_session_factory
+        from app.services.metrics_service import MetricsService
+        async with async_session_factory() as session:
+            cust_result = await MetricsService.get_core_metrics(
+                db=session,
+                period=body.context.period if body.context else None,
+                dimension="company",
+                compare="mom",
+                bgbu_filter="ALL",
+                sections={"customer_breakdown"},
+            )
+            customer_items = [b.model_dump() for b in cust_result.customer_breakdown]
+
     db_elapsed = time.time() - t0
 
     t1 = time.time()
@@ -757,11 +1036,13 @@ async def ai_chat(
     # Fallback to rule-based (only for financial questions)
     if not ai_answer:
         result = _generate_rule_based_answer(body.question, kpis, dept_items, prod_items, body.context)
+        # Enrich with customer_items in suggestions
+        result["suggestions"] = _get_page_suggestions(kpis, dept_items, prod_items, active_section, customer_items=customer_items)
         return APIResponse.success(data=result)
 
     # Build dynamic suggestions and references for AI success path
     active_section = body.context.active_section if body.context else ""
-    suggestions = _get_page_suggestions(kpis, dept_items, prod_items, active_section)
+    suggestions = _get_page_suggestions(kpis, dept_items, prod_items, active_section, customer_items=customer_items)
     references = [
         {"type": "metric", "label": "营业收入", "value": (kpis.get("revenue") or 0)},
         {"type": "metric", "label": "毛利率", "value": (kpis.get("gross_margin") or 0)},
@@ -947,6 +1228,23 @@ async def ai_chat_stream(
     # Skip expensive breakdown query — prompt only needs summary KPIs + RAG rules
     dept_items, prod_items = [], []
 
+    # Fetch customer breakdown for customer pages in streaming
+    customer_items_stream = []
+    _stream_active = body.context.active_section if body.context else ""
+    if _stream_active in ("customer", "overview"):
+        from app.db.session import async_session_factory
+        from app.services.metrics_service import MetricsService
+        async with async_session_factory() as session:
+            cust_r = await MetricsService.get_core_metrics(
+                db=session,
+                period=body.context.period if body.context else None,
+                dimension="company",
+                compare="mom",
+                bgbu_filter="ALL",
+                sections={"customer_breakdown"},
+            )
+            customer_items_stream = [b.model_dump() for b in cust_r.customer_breakdown]
+
     # Build prompt with RAG rules
     prompt = _build_chat_prompt(body, kpis, dept_items, prod_items)
 
@@ -965,7 +1263,7 @@ async def ai_chat_stream(
             yield chunk
 
         # After streaming, send suggestions and references as final event
-        suggestions = _get_page_suggestions(kpis, dept_items, prod_items, body.context.active_section if body.context else "")
+        suggestions = _get_page_suggestions(kpis, dept_items, prod_items, body.context.active_section if body.context else "", customer_items=customer_items_stream)
         final = json.dumps({
             "suggestions": suggestions,
             "references": [
@@ -977,6 +1275,92 @@ async def ai_chat_stream(
         yield f"data: {final}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/analysis-recommendations", response_model=APIResponse)
+async def get_analysis_recommendations(
+    body: AnalysisRecommendationRequest,
+    db: AsyncSession = Depends(get_db),
+    user: TokenPayload | None = Depends(get_optional_user),
+) -> APIResponse:
+    """Get page-specific analysis recommendations with metrics and anomaly alerts."""
+    from app.api.dashboard import _build_kpis
+    from app.db.session import async_session_factory
+    from app.services.metrics_service import MetricsService
+
+    bgbu_filter = "ALL"
+    if user and user.role != "admin" and user.department:
+        bgbu_filter = user.department
+
+    # Fetch current KPI data
+    dept_param = body.department if body.department else None
+    prod_param = body.product if body.product else None
+
+    kpis = await _build_kpis(
+        db,
+        period_compare_type=body.period_compare_type,
+        period_dimension=body.period_dimension,
+        period=body.period,
+        department=dept_param,
+        product=prod_param,
+    )
+
+    # Fetch department breakdown if needed
+    dept_items = []
+    if body.page_type in ("department", "dashboard", "core_metrics"):
+        async with async_session_factory() as session:
+            result = await MetricsService.get_core_metrics(
+                db=session,
+                period=body.period,
+                dimension="department",
+                compare="mom",
+                period_dimension=body.period_dimension or "monthly",
+                bgbu_filter=bgbu_filter,
+                sections={"breakdowns"},
+            )
+            dept_items = [b.model_dump() for b in result.breakdowns]
+
+    # Fetch product breakdown
+    prod_items = []
+    if body.page_type in ("product", "dashboard", "core_metrics"):
+        async with async_session_factory() as session:
+            result = await MetricsService.get_core_metrics(
+                db=session,
+                period=body.period,
+                dimension="product_line",
+                compare="mom",
+                period_dimension=body.period_dimension or "monthly",
+                product=prod_param,
+                bgbu_filter=bgbu_filter,
+                sections={"breakdowns"},
+            )
+            prod_items = [b.model_dump() for b in result.breakdowns]
+
+    # Fetch customer breakdown
+    customer_items = []
+    if body.page_type in ("customer", "dashboard"):
+        async with async_session_factory() as session:
+            result = await MetricsService.get_core_metrics(
+                db=session,
+                period=body.period,
+                dimension="company",
+                compare="mom",
+                period_dimension=body.period_dimension or "monthly",
+                bgbu_filter=bgbu_filter,
+                sections={"customer_breakdown"},
+            )
+            customer_items = [b.model_dump() for b in result.customer_breakdown]
+
+    recommendations = build_analysis_recommendations(
+        kpis=kpis,
+        dept_items=dept_items,
+        prod_items=prod_items,
+        customer_items=customer_items,
+        page_type=body.page_type,
+        period=body.period,
+    )
+
+    return APIResponse.success(data=recommendations)
 
 
 @router.get("/config", response_model=APIResponse)
