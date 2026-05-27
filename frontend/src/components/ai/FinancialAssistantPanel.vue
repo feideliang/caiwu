@@ -36,6 +36,49 @@
       </div>
     </div>
 
+    <!-- Analysis Recommendations -->
+    <div v-if="recommendations && messages.length === 0" class="recommendations">
+      <div v-if="recommendations.summary" class="rec-summary">
+        {{ recommendations.summary }}
+      </div>
+
+      <!-- Anomaly Alerts -->
+      <div v-if="recommendations.anomalies.length" class="rec-anomalies">
+        <div
+          v-for="(alert, idx) in recommendations.anomalies"
+          :key="idx"
+          :class="['rec-alert', alert.severity]"
+        >
+          <span class="alert-icon">{{ alert.severity === 'high' ? '🔴' : alert.severity === 'medium' ? '🟡' : '🔵' }}</span>
+          <span class="alert-message">{{ alert.message }}</span>
+        </div>
+      </div>
+
+      <!-- Key Metrics -->
+      <div v-if="recommendations.metrics.length" class="rec-metrics">
+        <div
+          v-for="(m, idx) in recommendations.metrics"
+          :key="idx"
+          class="rec-metric"
+          :class="m.status"
+        >
+          <span class="metric-name">{{ m.metric_name }}</span>
+          <span class="metric-value" v-if="m.current_value !== undefined">
+            {{ formatMetricValue(m) }}
+          </span>
+          <span class="metric-rec">{{ m.recommendation }}</span>
+        </div>
+      </div>
+
+      <!-- Drill-down path -->
+      <div v-if="recommendations.drill_down_path && recommendations.drill_down_path.length" class="rec-drilldown">
+        <span class="drilldown-label">建议下钻：</span>
+        <a-tag v-for="(p, idx) in recommendations.drill_down_path" :key="idx" size="small" color="geekblue">
+          {{ p }}
+        </a-tag>
+      </div>
+    </div>
+
     <!-- Suggestions -->
     <div v-if="suggestions.length > 0 && messages.length === 0" class="suggestions">
       <a-button
@@ -77,6 +120,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from 'vue';
 import { streamChat, getAIConfig, type ChatContext, type ChatMessage, type ChatReference, type ChatResponse } from '@/api/ai';
+import type { MetricRecommendation, AnomalyAlert } from '@/types/analysis';
 
 interface DisplayMessage extends ChatMessage {
   references?: ChatReference[];
@@ -84,6 +128,13 @@ interface DisplayMessage extends ChatMessage {
 
 const props = defineProps<{
   context?: ChatContext;
+  recommendations?: {
+    metrics: MetricRecommendation[];
+    anomalies: AnomalyAlert[];
+    suggested_questions: string[];
+    summary: string;
+    drill_down_path?: string[];
+  };
 }>();
 
 const messages = ref<DisplayMessage[]>([]);
@@ -190,6 +241,16 @@ async function sendMessage() {
 
 function onModelChange() {
   // Model changed, will be used in next request
+}
+
+function formatMetricValue(m: MetricRecommendation): string {
+  if (m.metric_key.includes('margin') || m.metric_key.includes('concentration') || m.metric_key.includes('ratio')) {
+    return m.current_value != null ? `${m.current_value.toFixed(1)}%` : '--';
+  }
+  if (m.current_value != null && m.current_value > 10000) {
+    return `${(m.current_value / 10000).toFixed(1)}亿`;
+  }
+  return m.current_value != null ? m.current_value.toFixed(0) : '--';
 }
 
 function escapeHtml(value: string): string {
@@ -398,5 +459,112 @@ watch(messages, async () => {
 
 .input-area {
   margin-top: 8px;
+}
+
+.recommendations {
+  padding: 8px 0;
+}
+
+.rec-summary {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.rec-anomalies {
+  margin-bottom: 8px;
+}
+
+.rec-alert {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 4px;
+
+  &.high {
+    background: #fff2f0;
+    border: 1px solid #ffccc7;
+    color: #cf1322;
+  }
+
+  &.medium {
+    background: #fffbe6;
+    border: 1px solid #ffe58f;
+    color: #d48806;
+  }
+
+  &.low {
+    background: #e6f4ff;
+    border: 1px solid #91caff;
+    color: #0958d9;
+  }
+}
+
+.alert-message {
+  flex: 1;
+}
+
+.rec-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rec-metric {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #f9f9f9;
+  font-size: 12px;
+
+  &.critical {
+    background: #fff2f0;
+    border: 1px solid #ffccc7;
+  }
+
+  &.warning {
+    background: #fffbe6;
+    border: 1px solid #ffe58f;
+  }
+
+  &.normal {
+    background: #f6ffed;
+    border: 1px solid #b7eb8f;
+  }
+}
+
+.metric-name {
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+}
+
+.metric-value {
+  color: #1677ff;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.metric-rec {
+  color: #666;
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.rec-drilldown {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.drilldown-label {
+  font-size: 12px;
+  color: #999;
 }
 </style>
