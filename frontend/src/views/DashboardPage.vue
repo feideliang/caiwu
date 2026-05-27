@@ -43,7 +43,7 @@
       />
     </div>
     <div v-if="showAssistant" class="dashboard-assistant">
-      <FinancialAssistantPanel :context="assistantContext" />
+      <FinancialAssistantPanel :context="assistantContext" :recommendations="recommendations" />
     </div>
   </div>
 </template>
@@ -52,6 +52,8 @@
 import FinancialOverview from '@/components/dashboard/FinancialOverview.vue';
 import FinancialAssistantPanel from '@/components/ai/FinancialAssistantPanel.vue';
 import { getFilterOptions } from '@/api/filters';
+import { getAnalysisRecommendations } from '@/api/ai';
+import type { AnalysisRecommendations } from '@/types/analysis';
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import {
   buildPeriodOptions,
@@ -105,6 +107,7 @@ watch([selectedPeriod, periodDimension], () => {
     periodStart.value = undefined;
     periodEnd.value = undefined;
   }
+  loadRecommendations();
 });
 
 watch(periodDimension, () => {
@@ -126,6 +129,21 @@ const assistantContext = computed(() => ({
   product: selectedProduct.value,
   active_section: 'overview' as string,
 }));
+
+const recommendations = ref<AnalysisRecommendations | null>(null);
+
+async function loadRecommendations() {
+  try {
+    const { data } = await getAnalysisRecommendations({
+      page_type: 'dashboard',
+      period: period.value,
+      period_compare_type: 'yoy',
+      department: selectedMarketLine.value,
+      product: selectedProduct.value,
+    });
+    recommendations.value = data.data || null;
+  } catch { /* non-critical */ }
+}
 
 async function fetchFilterOptions() {
   loading.value = true;
@@ -156,6 +174,7 @@ async function fetchFilterOptions() {
 onMounted(() => {
   window.addEventListener('resize', updateSize);
   fetchFilterOptions();
+  loadRecommendations();
 });
 onUnmounted(() => window.removeEventListener('resize', updateSize));
 </script>

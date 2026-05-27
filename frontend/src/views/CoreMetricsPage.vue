@@ -251,7 +251,7 @@
       </div>
 
       <div v-if="showAssistant" class="assistant-area">
-        <FinancialAssistantPanel :context="assistantContext" />
+        <FinancialAssistantPanel :context="assistantContext" :recommendations="recommendations" />
       </div>
     </div>
   </div>
@@ -266,6 +266,8 @@ import CrossDimensionChart from '@/components/dashboard/CrossDimensionChart.vue'
 import FinancialAssistantPanel from '@/components/ai/FinancialAssistantPanel.vue';
 import { getCoreMetrics } from '@/api/metrics';
 import { getFilterOptions } from '@/api/filters';
+import { getAnalysisRecommendations } from '@/api/ai';
+import type { AnalysisRecommendations } from '@/types/analysis';
 import type { CoreMetricsResponse } from '@/types/metrics';
 import { formatPercent, formatPp, formatWan, toWan } from '@/utils/format';
 import { buildPeriodOptions, formatMonthValue, getComparePeriod, getDefaultPeriod, normalizePeriodDimension } from '@/utils/period';
@@ -561,6 +563,19 @@ const assistantContext = computed(() => ({
   active_section: 'change_analysis',
 }));
 
+const recommendations = ref<AnalysisRecommendations | null>(null);
+
+async function loadRecommendations() {
+  try {
+    const { data } = await getAnalysisRecommendations({
+      page_type: 'core_metrics',
+      period: period.value,
+      period_compare_type: compareBase.value,
+    });
+    recommendations.value = data.data || null;
+  } catch { /* non-critical */ }
+}
+
 async function fetchMetrics() {
   basePeriodData.value = null;
   fetchKey++;
@@ -647,9 +662,10 @@ watch([periodDimension, selectedPeriod, dimension, periodStart, periodEnd, selec
     _oldCompare = newCompare;
   }
   fetchMetrics();
+  loadRecommendations();
 }, { immediate: true });
 
-onMounted(async () => { await fetchOptions(); });
+onMounted(async () => { await fetchOptions(); loadRecommendations(); });
 </script>
 
 <style scoped lang="less">

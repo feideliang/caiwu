@@ -128,7 +128,7 @@
       </a-card>
     </div>
     <div v-if="showAssistant" class="analysis-assistant">
-      <FinancialAssistantPanel :context="assistantContext" />
+      <FinancialAssistantPanel :context="assistantContext" :recommendations="recommendations" />
     </div>
 
     <!-- Calculation Rules -->
@@ -161,6 +161,8 @@ import InlineInsights from '@/components/dashboard/InlineInsights.vue';
 import FinancialAssistantPanel from '@/components/ai/FinancialAssistantPanel.vue';
 import { getCoreMetrics } from '@/api/metrics';
 import { getFilterOptions } from '@/api/filters';
+import { getAnalysisRecommendations } from '@/api/ai';
+import type { AnalysisRecommendations } from '@/types/analysis';
 import type { CoreMetricsResponse, BreakdownItem } from '@/types/metrics';
 import { toWan, formatPercent, formatWan } from '@/utils/format';
 import { buildPeriodOptions, formatMonthValue, getDefaultPeriod, normalizePeriodDimension } from '@/utils/period';
@@ -315,6 +317,19 @@ const assistantContext = computed(() => ({
   active_section: 'customer',
 }));
 
+const recommendations = ref<AnalysisRecommendations | null>(null);
+
+async function loadRecommendations() {
+  try {
+    const { data } = await getAnalysisRecommendations({
+      page_type: 'customer',
+      period: period.value,
+      period_compare_type: compareBase.value,
+    });
+    recommendations.value = data.data || null;
+  } catch { /* non-critical */ }
+}
+
 async function fetchMetrics() {
   loading.value = true;
   try {
@@ -353,10 +368,13 @@ async function fetchOptions() {
 function refresh() { fetchMetrics(); }
 
 watch([periodDimension, selectedPeriod, compareBase, selectedCustomer, periodStart, periodEnd], () => {
-  if (!drillMode.value) fetchMetrics();
+  if (!drillMode.value) {
+    fetchMetrics();
+    loadRecommendations();
+  }
 });
 
-onMounted(async () => { await fetchOptions(); await fetchMetrics(); });
+onMounted(async () => { await fetchOptions(); await fetchMetrics(); loadRecommendations(); });
 </script>
 
 <style scoped lang="less">

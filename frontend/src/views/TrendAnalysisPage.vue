@@ -66,7 +66,7 @@
       </a-row>
     </div>
     <div v-if="showAssistant" class="analysis-assistant">
-      <FinancialAssistantPanel :context="assistantContext" />
+      <FinancialAssistantPanel :context="assistantContext" :recommendations="recommendations" />
     </div>
 
     <!-- Calculation Rules -->
@@ -100,6 +100,8 @@ import InlineInsights from '@/components/dashboard/InlineInsights.vue';
 import FinancialAssistantPanel from '@/components/ai/FinancialAssistantPanel.vue';
 import { getCoreMetrics } from '@/api/metrics';
 import { getFilterOptions } from '@/api/filters';
+import { getAnalysisRecommendations } from '@/api/ai';
+import type { AnalysisRecommendations } from '@/types/analysis';
 import type { CoreMetricsResponse, TrendDataPoint } from '@/types/metrics';
 import { toWan } from '@/utils/format';
 import { buildPeriodOptions, getDefaultPeriod, normalizePeriodDimension } from '@/utils/period';
@@ -281,6 +283,20 @@ const assistantContext = computed(() => ({
   active_section: 'trend',
 }));
 
+const recommendations = ref<AnalysisRecommendations | null>(null);
+
+async function loadRecommendations() {
+  try {
+    const { data } = await getAnalysisRecommendations({
+      page_type: 'trend',
+      period: period.value,
+      period_compare_type: compareBase.value,
+      period_dimension: periodDimension.value,
+    });
+    recommendations.value = data.data || null;
+  } catch { /* non-critical */ }
+}
+
 async function fetchMetrics() {
   loading.value = true;
   try {
@@ -325,11 +341,12 @@ function refresh() { fetchMetrics(); }
 watch([periodDimension, selectedPeriod, trendDimension], async () => {
   await loadEntityOptions();
   fetchMetrics();
+  loadRecommendations();
 });
 watch(selectedEntity, refresh);
 watch(compareBase, refresh);
 
-onMounted(async () => { await fetchOptions(); await fetchMetrics(); });
+onMounted(async () => { await fetchOptions(); await fetchMetrics(); loadRecommendations(); });
 </script>
 
 <style scoped lang="less">
