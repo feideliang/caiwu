@@ -795,7 +795,7 @@ class MetricsService:
         if total_cust_rev_for_ratio is None:
             total_cust_rev_for_ratio = sum(cust_rev.values()) if cust_rev else 0.0
         cust_top3 = None
-        if not has_entity_filter and cust_rev and total_cust_rev_for_ratio:
+        if cust_rev and total_cust_rev_for_ratio:
             top3_sum = sum(sorted(cust_rev.values(), reverse=True)[:3])
             cust_top3 = min(top3_sum / total_cust_rev_for_ratio * 100, 100.0)
 
@@ -816,13 +816,13 @@ class MetricsService:
 
         # Customer concentration top10 (revenue)
         cust_top10 = None
-        if not has_entity_filter and cust_rev and total_cust_rev_for_ratio:
+        if cust_rev and total_cust_rev_for_ratio:
             top10_sum = sum(sorted(cust_rev.values(), reverse=True)[:10])
             cust_top10 = min(top10_sum / total_cust_rev_for_ratio * 100, 100.0)
 
         # Top single customer revenue share
         cust_top1_share = None
-        if not has_entity_filter and cust_rev and total_cust_rev_for_ratio:
+        if cust_rev and total_cust_rev_for_ratio:
             cust_top1_share = min(max(cust_rev.values()) / total_cust_rev_for_ratio * 100, 100.0)
 
         # Product concentration top3 (gross_profit)
@@ -831,13 +831,13 @@ class MetricsService:
         prod_rev = current_product_rev
         prod_top3 = None
         total_prod_rev = sum(prod_rev.values()) if prod_rev else 0.0
-        if not has_entity_filter and prod_rev and total_prod_rev:
+        if prod_rev and total_prod_rev:
             top3_sum = sum(sorted(prod_rev.values(), reverse=True)[:3])
             prod_top3 = min(top3_sum / total_prod_rev * 100, 100.0)
 
         # Product concentration top10 (gross_profit)
         prod_top10 = None
-        if not has_entity_filter and prod_rev and total_prod_rev:
+        if prod_rev and total_prod_rev:
             top10_sum = sum(sorted(prod_rev.values(), reverse=True)[:10])
             prod_top10 = min(top10_sum / total_prod_rev * 100, 100.0)
 
