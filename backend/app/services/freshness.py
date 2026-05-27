@@ -83,12 +83,12 @@ async def _compute_freshness(db: AsyncSession) -> dict:
         else:
             status = "error"
 
-    # Get data range (min/max period from financial_data)
-    from app.models.core import FinancialData
+    # Get data range (min/max period from agg_period_summary)
+    from app.models.core import AggPeriodSummary
 
     range_stmt = select(
-        func.min(FinancialData.period),
-        func.max(FinancialData.period),
+        func.min(AggPeriodSummary.period),
+        func.max(AggPeriodSummary.period),
     )
     range_result = await db.execute(range_stmt)
     range_row = range_result.first()

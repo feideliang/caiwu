@@ -18,8 +18,24 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    from app.db.session import close_db
+    from app.db.session import close_db, engine, async_session_factory
     from app.core.cache import close_redis
+
+    # Pre-warm database connections (establishes SSL + auth for pool)
+    # This prevents 2-3s delay on first request from cold connection setup
+    # Pre-warm 5 connections to cover concurrent BFF requests
+    try:
+        import asyncio as _aio
+        from sqlalchemy import text as _text
+
+        async def _warm_one():
+            async with async_session_factory() as session:
+                await session.execute(_text("SELECT 1"))
+
+        await _aio.gather(*[_warm_one() for _ in range(5)])
+        logger.info("Database connection pool pre-warmed (5 connections)")
+    except Exception as exc:
+        logger.warning("Failed to pre-warm DB connections: %s", exc)
 
     # Log Celery configuration
     try:

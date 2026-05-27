@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import JSON, BigInteger, Date, DateTime, Enum, Float, ForeignKey, Index, Integer, Numeric, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -53,8 +54,9 @@ class FinancialData(Base):
     metric_unit: Mapped[str] = mapped_column(String(32), nullable=True)
     period: Mapped[str] = mapped_column(String(32), nullable=False, index=True)  # e.g. "2024-Q1"
     entity: Mapped[str | None] = mapped_column(String(128))  # company / department
-    tags: Mapped[dict | None] = mapped_column(JSON)
-    raw_row: Mapped[dict | None] = mapped_column(JSON)  # full Excel row snapshot
+    tags: Mapped[dict | None] = mapped_column(JSONB)  # jsonb for fast ->> extraction
+    raw_row: Mapped[dict | None] = mapped_column(JSONB)  # full Excel row snapshot
+    bucket: Mapped[str | None] = mapped_column(String(32), index=True)  # pre-computed: revenue/cost/gross_profit/target_revenue
 
 
 # ── 2. data_batch ─────────────────────────────────────────────
@@ -160,6 +162,133 @@ class KnowledgeRule(Base):
     is_active: Mapped[bool] = mapped_column(default=True)
     qdrant_point_id: Mapped[str | None] = mapped_column(String(36))  # UUID in Qdrant
 
+    # ── Structured rule fields for engine execution ──
+    rule_code: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    severity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    condition: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_executable: Mapped[bool] = mapped_column(default=False, server_default="false")
+
+
+# ── 11. income_margin_detail (wide table) ─────────────────────
+
+class IncomeMarginDetail(Base):
+    """Wide table matching Excel income/margin detail layout 1:1.
+
+    Designed for pandas-based import; each Excel row maps to one row.
+    Dimension tables and financial_data metrics are derived via sync flows.
+    """
+    __tablename__ = "income_margin_detail"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    # ── Period / Entity ──
+    period: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    entity: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+
+    # ── Order Info ──
+    order_register_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    revenue_confirm_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    order_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    contract_no: Mapped[str | None] = mapped_column(String(128))
+    order_category: Mapped[str | None] = mapped_column(String(64))
+    order_header_type: Mapped[str | None] = mapped_column(String(64))
+    order_customer: Mapped[str | None] = mapped_column(String(256))
+    sequence_no: Mapped[str | None] = mapped_column(String(32))
+    order_amount: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    order_qty: Mapped[int | None] = mapped_column(Integer)
+
+    # ── Company / HR ──
+    company: Mapped[str | None] = mapped_column(String(128))
+    hr_dept_code: Mapped[str | None] = mapped_column(String(64))
+    hr_department: Mapped[str | None] = mapped_column(String(256))
+    sales_department: Mapped[str | None] = mapped_column(String(256))
+    sales_person_code: Mapped[str | None] = mapped_column(String(64))
+    sales_person: Mapped[str | None] = mapped_column(String(128))
+
+    # ── Product Hierarchy ──
+    product_category: Mapped[str | None] = mapped_column(String(128))
+    product_classification: Mapped[str | None] = mapped_column(String(128))
+    product_bu_code: Mapped[str | None] = mapped_column(String(64))
+    product_bu_name: Mapped[str | None] = mapped_column(String(256))
+    product_bgbu: Mapped[str | None] = mapped_column(String(128))
+    product_org: Mapped[str | None] = mapped_column(String(256))
+    series: Mapped[str | None] = mapped_column(String(256))
+    product_line: Mapped[str | None] = mapped_column(String(256))
+    product_family: Mapped[str | None] = mapped_column(String(256))
+    sales_product_code: Mapped[str | None] = mapped_column(String(128))
+    sales_product_name: Mapped[str | None] = mapped_column(String(256))
+    material_code: Mapped[str | None] = mapped_column(String(128))
+    material_desc: Mapped[str | None] = mapped_column(Text)
+    material_cost_category: Mapped[str | None] = mapped_column(String(128))
+
+    # ── Cost Classification ──
+    cost_class_1: Mapped[str | None] = mapped_column(String(128))
+    cost_class_2: Mapped[str | None] = mapped_column(String(128))
+    cost_class_3: Mapped[str | None] = mapped_column(String(128))
+    cost_category: Mapped[str | None] = mapped_column(String(128))
+
+    # ── Customer ──
+    ncc_customer_code: Mapped[str | None] = mapped_column(String(64))
+    customer: Mapped[str | None] = mapped_column(String(256), index=True)
+    invoice_customer: Mapped[str | None] = mapped_column(String(256))
+    invoice_name: Mapped[str | None] = mapped_column(String(256))
+    final_customer: Mapped[str | None] = mapped_column(String(256))
+    superior_name: Mapped[str | None] = mapped_column(String(256))
+    contract_type: Mapped[str | None] = mapped_column(String(64))
+    contract_type_merged: Mapped[str | None] = mapped_column(String(64))
+    customer_supplied_original: Mapped[str | None] = mapped_column(String(64))
+    customer_supplied_other: Mapped[str | None] = mapped_column(String(64))
+
+    # ── Geography / Market ──
+    province: Mapped[str | None] = mapped_column(String(64))
+    market_segment: Mapped[str | None] = mapped_column(String(256))
+    region: Mapped[str | None] = mapped_column(String(128))
+    bgbu: Mapped[str | None] = mapped_column(String(64))
+    business_type: Mapped[str | None] = mapped_column(String(64))
+
+    # ── Project / Application ──
+    project_name: Mapped[str | None] = mapped_column(String(256))
+    application_scenario: Mapped[str | None] = mapped_column(String(256))
+    summary_name: Mapped[str | None] = mapped_column(String(256))
+
+    # ── Invoice ──
+    invoice_status: Mapped[str | None] = mapped_column(String(64))
+    invoice_customer_short: Mapped[str | None] = mapped_column(String(256))
+
+    # ── Currency / Exchange ──
+    currency: Mapped[str | None] = mapped_column(String(16))
+    exchange_rate_local: Mapped[float | None] = mapped_column(Numeric(18, 8))
+    exchange_rate_rmb: Mapped[float | None] = mapped_column(Numeric(18, 8))
+    tax_rate: Mapped[float | None] = mapped_column(Numeric(10, 4))
+
+    # ── Financial Metrics (Tax-Excluded) ──
+    revenue_amount: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    revenue_amount_local: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    revenue_amount_original: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    revenue_qty: Mapped[int | None] = mapped_column(Integer)
+    cost_amount: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    unit_cost_ex_tax: Mapped[float | None] = mapped_column(Numeric(20, 4))
+    gross_profit_amount: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    gross_margin_pct: Mapped[float | None] = mapped_column(Numeric(10, 4))
+
+    # ── Financial Metrics (Tax-Included) ──
+    cost_incl_tax: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    unit_cost_incl_tax: Mapped[float | None] = mapped_column(Numeric(20, 4))
+    gross_profit_incl_tax: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    sales_amount_incl_tax_local: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    sales_amount_incl_tax_rmb: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    sales_amount_incl_tax_original: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    tax_amount_local: Mapped[float | None] = mapped_column(Numeric(20, 2))
+    sales_type: Mapped[str | None] = mapped_column(String(32))
+
+    # ── Revenue Year/Month ──
+    revenue_year: Mapped[int | None] = mapped_column(Integer)
+    revenue_month: Mapped[int | None] = mapped_column(Integer)
+
+    # ── Raw data ──
+    raw_data: Mapped[dict | None] = mapped_column(JSON)
+
 
 # ── 9. sync_job ───────────────────────────────────────────────
 
@@ -174,3 +303,61 @@ class SyncJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
     error_message: Mapped[str | None] = mapped_column(Text)
     records_processed: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# ── Aggregation Tables (pre-computed from income_margin_detail) ──
+
+class _AggBase(DeclarativeBase):
+    """Plain base for aggregation tables (no created_at/updated_at)."""
+
+
+class AggPeriodSummary(_AggBase):
+    """Monthly summary per department (bgbu) or 'ALL' for global."""
+    __tablename__ = "agg_period_summary"
+
+    period: Mapped[str] = mapped_column(String(10), primary_key=True)
+    bgbu: Mapped[str] = mapped_column(String(64), primary_key=True, server_default="ALL")
+    revenue: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    cost: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    gross_profit: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    order_count: Mapped[int] = mapped_column(Integer, server_default="0")
+    direct_sign_revenue: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    direct_sign_cost: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    direct_sign_gp: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    target_revenue: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+
+
+class AggDimensionSummary(_AggBase):
+    """Dimension breakdown per period per department (bgbu) or 'ALL'."""
+    __tablename__ = "agg_dimension_summary"
+
+    period: Mapped[str] = mapped_column(String(10), primary_key=True)
+    bgbu: Mapped[str] = mapped_column(String(64), primary_key=True, server_default="ALL")
+    dim_type: Mapped[str] = mapped_column(String(32), primary_key=True)  # product_line, sales_product, customer, contract_type
+    dim_value: Mapped[str] = mapped_column(String(512), primary_key=True)
+    revenue: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    cost: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    gross_profit: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    order_count: Mapped[int] = mapped_column(Integer, server_default="0")
+
+    __table_args__ = (
+        Index("idx_ads_period_dim", "period", "dim_type"),
+    )
+
+
+class AggOrderSummary(_AggBase):
+    """Order-level summary per period per department (bgbu) or 'ALL'."""
+    __tablename__ = "agg_order_summary"
+
+    period: Mapped[str] = mapped_column(String(10), primary_key=True)
+    bgbu: Mapped[str] = mapped_column(String(64), primary_key=True, server_default="ALL")
+    order_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    dim_dept: Mapped[str | None] = mapped_column(String(256))
+    dim_product: Mapped[str | None] = mapped_column(String(128))
+    revenue: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    cost: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+    gross_profit: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
+
+    __table_args__ = (
+        Index("idx_aos_period", "period"),
+    )

@@ -282,9 +282,9 @@ def _ai_analyze(report_id: int, data: dict) -> dict:
 
     overview_parts = []
     if revenue.get("sum"):
-        overview_parts.append(f"本期累计收入 {revenue['sum']:,.2f} 元")
+        overview_parts.append(f"本期累计收入 {revenue['sum']:,.0f} 元")
     if gp.get("sum"):
-        overview_parts.append(f"毛利额 {gp['sum']:,.2f} 元")
+        overview_parts.append(f"毛利额 {gp['sum']:,.0f} 元")
     if margin.get("mean"):
         overview_parts.append(f"整体毛利率 {margin['mean']:.2f}%")
     if orders.get("sum"):
@@ -310,7 +310,7 @@ def _ai_analyze(report_id: int, data: dict) -> dict:
         lines = ["部门维度分析："]
         for name, vals in top_dept:
             gm = (vals["gross_profit"] / vals["revenue"] * 100) if vals["revenue"] else 0
-            lines.append(f"  {name}: 收入 {vals['revenue']:,.2f} 元，毛利 {vals['gross_profit']:,.2f} 元，毛利率 {gm:.1f}%")
+            lines.append(f"  {name}: 收入 {vals['revenue']:,.0f} 元，毛利 {vals['gross_profit']:,.0f} 元，毛利率 {gm:.2f}%")
         breakdown_text += "\n".join(lines)
 
     if prod_rows:
@@ -326,7 +326,7 @@ def _ai_analyze(report_id: int, data: dict) -> dict:
         lines = ["产品线维度分析："]
         for name, vals in top_prod:
             gm = (vals["gross_profit"] / vals["revenue"] * 100) if vals["revenue"] else 0
-            lines.append(f"  {name}: 收入 {vals['revenue']:,.2f} 元，毛利 {vals['gross_profit']:,.2f} 元，毛利率 {gm:.1f}%")
+            lines.append(f"  {name}: 收入 {vals['revenue']:,.0f} 元，毛利 {vals['gross_profit']:,.0f} 元，毛利率 {gm:.2f}%")
         if breakdown_text:
             breakdown_text += "\n"
         breakdown_text += "\n".join(lines)
@@ -339,7 +339,7 @@ def _ai_analyze(report_id: int, data: dict) -> dict:
     if revenue.get("sum") and gp.get("sum"):
         overall_margin = gp["sum"] / revenue["sum"] * 100 if revenue["sum"] else 0
         cause_text = (
-            f"本期收入与毛利的整体关联度：毛利率 {overall_margin:.1f}%。"
+            f"本期收入与毛利的整体关联度：毛利率 {overall_margin:.2f}%。"
             f"{'收入与毛利双增长，经营态势良好。' if overall_margin > 20 else '毛利率偏低，需关注成本结构。' if overall_margin > 0 else '出现毛利为负情况，需重点排查亏损订单。'}"
         )
     else:

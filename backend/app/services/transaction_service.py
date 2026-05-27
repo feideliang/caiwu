@@ -1,11 +1,15 @@
-"""Transaction analysis service."""
+"""Transaction analysis service — uses aggregated tables instead of financial_data."""
 from __future__ import annotations
 
 from collections import defaultdict
 from math import sqrt
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.core import AggPeriodSummary, AggDimensionSummary, AggOrderSummary
+
+# AR amount still needs financial_data since it is not in agg tables.
+# Import only for the narrow AR-lookup used in get_contracts.
 from app.models.core import FinancialData
 
 
@@ -16,36 +20,78 @@ class TransactionService:
         entity: str | None = None, page: int = 1, page_size: int = 20,
         department: str | None = None,
     ) -> tuple[list[dict], int]:
+        # Revenue and cost per customer from agg_dimension_summary (dim_type='customer')
         stmt = select(
-            FinancialData.entity,
-            FinancialData.period,
-            func.sum(FinancialData.metric_value).label("total_value"),
-            FinancialData.metric_name,
+            AggDimensionSummary.dim_value,
+            AggDimensionSummary.period,
+            AggDimensionSummary.revenue,
+            AggDimensionSummary.cost,
         ).where(
-            FinancialData.metric_name.in_(["ar_amount", "ap_amount"]),
-            FinancialData.entity.isnot(None),
-            FinancialData.entity != "",
+            AggDimensionSummary.dim_type == "customer",
         )
         if period:
-            stmt = stmt.where(FinancialData.period == period)
+            stmt = stmt.where(AggDimensionSummary.period == period)
         if entity:
-            stmt = stmt.where(FinancialData.entity == entity)
+            stmt = stmt.where(AggDimensionSummary.dim_value == entity)
         if department:
-            stmt = stmt.where(FinancialData.entity == department)
-        stmt = stmt.group_by(FinancialData.entity, FinancialData.period, FinancialData.metric_name)
+            stmt = stmt.where(AggDimensionSummary.bgbu == department)
 
         result = await db.execute(stmt)
-        rows = result.all()
+        dim_rows = result.all()
 
+        # For AR amounts, fall back to financial_data (not in agg tables)
+        # NOTE: scoped by period/entity/department to avoid full table scan
+        ar_stmt = select(
+            FinancialData.entity,
+            FinancialData.period,
+            func.sum(FinancialData.metric_value).label("ar_value"),
+        ).where(
+            FinancialData.metric_name == "ar_amount",
+            FinancialData.entity.isnot(None),
+            FinancialData.entity != "",
+            FinancialData.period.isnot(None),  # avoid NULL period scans
+        )
+        if period:
+            ar_stmt = ar_stmt.where(FinancialData.period == period)
+        if entity:
+            ar_stmt = ar_stmt.where(FinancialData.entity == entity)
+        if department:
+            ar_stmt = ar_stmt.where(FinancialData.entity == department)
+        ar_stmt = ar_stmt.group_by(FinancialData.entity, FinancialData.period)
+        ar_result = await db.execute(ar_stmt)
+        ar_rows = ar_result.all()
+
+        # Group by (customer, period)
         groups: dict = {}
-        for r in rows:
+        for r in dim_rows:
+            key = (r.dim_value, r.period)
+            if key not in groups:
+                groups[key] = {
+                    "entity": r.dim_value,
+                    "total_revenue": float(r.revenue or 0),
+                    "total_cost": float(r.cost or 0),
+                    "total_ar": 0,
+                    "total_ap": 0,
+                    "net_exposure": 0,
+                    "period": r.period,
+                }
+            else:
+                groups[key]["total_revenue"] += float(r.revenue or 0)
+                groups[key]["total_cost"] += float(r.cost or 0)
+
+        for r in ar_rows:
             key = (r.entity, r.period)
             if key not in groups:
-                groups[key] = {"entity": r.entity, "total_ar": 0, "total_ap": 0, "net_exposure": 0, "period": r.period}
-            if r.metric_name == "ar_amount":
-                groups[key]["total_ar"] = float(r.total_value or 0)
-            else:
-                groups[key]["total_ap"] = float(r.total_value or 0)
+                groups[key] = {
+                    "entity": r.entity,
+                    "total_revenue": 0,
+                    "total_cost": 0,
+                    "total_ar": 0,
+                    "total_ap": 0,
+                    "net_exposure": 0,
+                    "period": r.period,
+                }
+            groups[key]["total_ar"] = float(r.ar_value or 0)
 
         items = []
         for g in groups.values():
@@ -64,40 +110,36 @@ class TransactionService:
         department: str | None = None,
     ) -> tuple[list[dict], int]:
         stmt = select(
-            FinancialData.period,
-            FinancialData.metric_name,
-            func.sum(FinancialData.metric_value).label("total_value"),
-        ).where(
-            FinancialData.metric_name.in_(["revenue", "cost"]),
+            AggPeriodSummary.period,
+            AggPeriodSummary.revenue,
+            AggPeriodSummary.cost,
+            AggPeriodSummary.order_count,
         )
         if department:
-            stmt = stmt.where(FinancialData.entity == department)
+            stmt = stmt.where(AggPeriodSummary.bgbu == department)
         if period_from:
-            stmt = stmt.where(FinancialData.period >= period_from)
+            stmt = stmt.where(AggPeriodSummary.period >= period_from)
         if period_to:
-            stmt = stmt.where(FinancialData.period <= period_to)
-        stmt = stmt.group_by(FinancialData.period, FinancialData.metric_name)
+            stmt = stmt.where(AggPeriodSummary.period <= period_to)
 
         result = await db.execute(stmt)
         rows = result.all()
 
-        groups: dict = {}
-        for r in rows:
-            if r.period not in groups:
-                groups[r.period] = {"period": r.period, "revenue": 0, "cost": 0, "profit": 0}
-            if r.metric_name == "revenue":
-                groups[r.period]["revenue"] = float(r.total_value or 0)
-            else:
-                groups[r.period]["cost"] = float(r.total_value or 0)
-
         items = []
-        for g in groups.values():
-            g["profit"] = g["revenue"] - g["cost"]
-            if min_value is not None and g["revenue"] < min_value:
+        for r in rows:
+            rev = float(r.revenue or 0)
+            cost = float(r.cost or 0)
+            if min_value is not None and rev < min_value:
                 continue
-            items.append(g)
-        items.sort(key=lambda x: x["period"], reverse=True)
+            items.append({
+                "period": r.period,
+                "revenue": rev,
+                "cost": cost,
+                "profit": rev - cost,
+                "order_count": r.order_count,
+            })
 
+        items.sort(key=lambda x: x["period"], reverse=True)
         total = len(items)
         offset = (page - 1) * page_size
         return items[offset: offset + page_size], total
@@ -107,42 +149,46 @@ class TransactionService:
         page: int = 1, page_size: int = 20,
         department: str | None = None,
     ) -> tuple[list[dict], int]:
+        # Use agg_dimension_summary for product_line and sales_product dimensions
         stmt = select(
-            FinancialData.entity,
-            FinancialData.metric_name,
-            func.sum(FinancialData.metric_value).label("total_value"),
-            func.min(FinancialData.period).label("period_start"),
-            func.max(FinancialData.period).label("period_end"),
+            AggDimensionSummary.dim_value,
+            AggDimensionSummary.dim_type,
+            func.sum(AggDimensionSummary.revenue).label("total_revenue"),
+            func.sum(AggDimensionSummary.cost).label("total_cost"),
+            func.min(AggDimensionSummary.period).label("period_start"),
+            func.max(AggDimensionSummary.period).label("period_end"),
         ).where(
-            FinancialData.metric_name.in_(["revenue", "cost"]),
-            FinancialData.entity.isnot(None),
-            FinancialData.entity != "",
+            AggDimensionSummary.dim_type.in_(["product_line", "sales_product"]),
         )
         if entity:
-            stmt = stmt.where(FinancialData.entity == entity)
+            stmt = stmt.where(AggDimensionSummary.dim_value == entity)
         if department:
-            stmt = stmt.where(FinancialData.entity == department)
-        stmt = stmt.group_by(FinancialData.entity, FinancialData.metric_name)
+            stmt = stmt.where(AggDimensionSummary.bgbu == department)
+        stmt = stmt.group_by(AggDimensionSummary.dim_value, AggDimensionSummary.dim_type)
 
         result = await db.execute(stmt)
         rows = result.all()
 
         groups: dict = {}
         for r in rows:
-            if r.entity not in groups:
-                groups[r.entity] = {
-                    "entity": r.entity, "total_revenue": 0, "total_cost": 0,
-                    "profit_margin": 0, "period_span": f"{r.period_start} ~ {r.period_end}",
+            if r.dim_value not in groups:
+                groups[r.dim_value] = {
+                    "entity": r.dim_value,
+                    "total_revenue": 0,
+                    "total_cost": 0,
+                    "profit_margin": 0,
+                    "period_span": f"{r.period_start} ~ {r.period_end}",
+                    "dim_type": r.dim_type,
                 }
-            if r.metric_name == "revenue":
-                groups[r.entity]["total_revenue"] = float(r.total_value or 0)
-            else:
-                groups[r.entity]["total_cost"] = float(r.total_value or 0)
+            groups[r.dim_value]["total_revenue"] += float(r.total_revenue or 0)
+            groups[r.dim_value]["total_cost"] += float(r.total_cost or 0)
 
         items = list(groups.values())
         for item in items:
             if item["total_revenue"] > 0:
-                item["profit_margin"] = round((item["total_revenue"] - item["total_cost"]) / item["total_revenue"], 4)
+                item["profit_margin"] = round(
+                    (item["total_revenue"] - item["total_cost"]) / item["total_revenue"], 4
+                )
         items.sort(key=lambda x: x["total_revenue"], reverse=True)
 
         total = len(items)
@@ -154,77 +200,78 @@ class TransactionService:
         metric_names: str | None = None, period: str | None = None,
         department: str | None = None,
     ) -> list[dict]:
+        # Read aggregated period-level data (few hundred rows instead of 810k)
         stmt = select(
-            FinancialData.metric_name,
-            FinancialData.period,
-            FinancialData.metric_value,
-            FinancialData.entity,
-        ).where(FinancialData.metric_value.isnot(None))
+            AggPeriodSummary.period,
+            AggPeriodSummary.revenue,
+            AggPeriodSummary.cost,
+            AggPeriodSummary.gross_profit,
+        )
         if department:
-            stmt = stmt.where(FinancialData.entity == department)
-        if metric_names:
-            names = [n.strip() for n in metric_names.split(",")]
-            stmt = stmt.where(FinancialData.metric_name.in_(names))
+            stmt = stmt.where(AggPeriodSummary.bgbu == department)
         if period:
-            stmt = stmt.where(FinancialData.period == period)
+            stmt = stmt.where(AggPeriodSummary.period == period)
 
         result = await db.execute(stmt)
         rows = result.all()
 
-        metric_groups = defaultdict(list)
-        for r in rows:
-            metric_groups[r.metric_name].append(r)
-
         anomalies = []
-        for metric, items in metric_groups.items():
-            values = [float(it.metric_value) for it in items]
+
+        # --- Statistical anomaly detection on aggregated revenue ---
+        revenue_by_period = []
+        for r in rows:
+            val = float(r.revenue or 0)
+            if val != 0:
+                revenue_by_period.append((r.period, val))
+
+        if len(revenue_by_period) >= 3:
+            values = [v for _, v in revenue_by_period]
             n = len(values)
-            if n < 3:
-                continue
             mean = sum(values) / n
             variance = sum((v - mean) ** 2 for v in values) / n
             stddev = sqrt(variance) if variance > 0 else 0
-            if stddev == 0:
-                continue
 
-            for it in items:
-                val = float(it.metric_value)
-                sigma = abs(val - mean) / stddev
-                if sigma >= threshold:
-                    anomalies.append({
-                        "metric_name": it.metric_name,
-                        "period": it.period,
-                        "value": val,
-                        "expected_mean": round(mean, 4),
-                        "sigma_distance": round(sigma, 2),
-                        "entity": it.entity,
-                    })
+            if stddev > 0:
+                for prd, val in revenue_by_period:
+                    sigma = abs(val - mean) / stddev
+                    if sigma >= threshold:
+                        anomalies.append({
+                            "metric_name": "revenue",
+                            "period": prd,
+                            "value": val,
+                            "expected_mean": round(mean, 4),
+                            "sigma_distance": round(sigma, 2),
+                            "entity": department or "ALL",
+                        })
 
-        # --- Additional anomaly checks ---
-        # 1. Gross margin checks
-        margin_stmt = select(
-            FinancialData.period,
-            func.sum(FinancialData.metric_value).label("revenue"),
-        ).where(
-            FinancialData.metric_name == "revenue",
-            FinancialData.period.isnot(None),
-        ).group_by(FinancialData.period)
-        if department:
-            margin_stmt = margin_stmt.where(FinancialData.entity == department)
-        margin_result = await db.execute(margin_stmt)
-        period_revenues = {r.period: float(r.revenue or 0) for r in margin_result.all()}
+        # Also check cost anomalies
+        cost_by_period = [(r.period, float(r.cost or 0)) for r in rows if r.cost]
+        if len(cost_by_period) >= 3:
+            values = [v for _, v in cost_by_period]
+            n = len(values)
+            mean = sum(values) / n
+            variance = sum((v - mean) ** 2 for v in values) / n
+            stddev = sqrt(variance) if variance > 0 else 0
 
-        cost_stmt = select(
-            FinancialData.period,
-            func.sum(FinancialData.metric_value).label("cost"),
-        ).where(
-            FinancialData.metric_name == "cost",
-            FinancialData.period.isnot(None),
-        ).group_by(FinancialData.period)
-        if department:
-            cost_stmt = cost_stmt.where(FinancialData.entity == department)
-        cost_result = await db.execute(cost_stmt)
-        period_costs = {r.period: float(r.cost or 0) for r in cost_result.all()}
+            if stddev > 0:
+                for prd, val in cost_by_period:
+                    sigma = abs(val - mean) / stddev
+                    if sigma >= threshold:
+                        anomalies.append({
+                            "metric_name": "cost",
+                            "period": prd,
+                            "value": val,
+                            "expected_mean": round(mean, 4),
+                            "sigma_distance": round(sigma, 2),
+                            "entity": department or "ALL",
+                        })
+
+        # --- Gross margin checks (from agg data) ---
+        period_revenues = {}
+        period_costs = {}
+        for r in rows:
+            period_revenues[r.period] = float(r.revenue or 0)
+            period_costs[r.period] = float(r.cost or 0)
 
         for prd in sorted(period_revenues.keys()):
             rev = period_revenues.get(prd, 0)
@@ -258,33 +305,34 @@ class TransactionService:
                     "message": f"毛利率{gm:.2f}% > 60%，需复核",
                 })
 
-        # 2. Consecutive growth check (3 consecutive periods of positive revenue growth)
+        # --- Consecutive growth check ---
         sorted_periods = sorted(period_revenues.keys())
         for i in range(len(sorted_periods) - 2):
             p1, p2, p3 = sorted_periods[i], sorted_periods[i + 1], sorted_periods[i + 2]
-            r1, r2, r3 = period_revenues.get(p1, 0), period_revenues.get(p2, 0), period_revenues.get(p3, 0)
+            r1 = period_revenues.get(p1, 0)
+            r2 = period_revenues.get(p2, 0)
+            r3 = period_revenues.get(p3, 0)
             if r1 > 0 and r2 > r1 and r3 > r2:
                 anomalies.append({
                     "metric_name": "revenue",
                     "period": p3,
                     "value": round(r3, 2),
                     "alert_level": "info",
-                    "message": f"连续3期收入正增长趋势: {p1}→{p2}→{p3}",
+                    "message": f"连续3期收入正增长趋势: {p1}->{p2}->{p3}",
                 })
 
-        # 3. Customer concentration risk (any customer > 30% of total revenue)
+        # --- Customer concentration risk ---
         cust_stmt = select(
-            FinancialData.entity,
-            func.sum(FinancialData.metric_value).label("total"),
+            AggDimensionSummary.dim_value,
+            func.sum(AggDimensionSummary.revenue).label("total"),
         ).where(
-            FinancialData.metric_name == "revenue",
-            FinancialData.entity.isnot(None),
-            FinancialData.entity != "",
-        ).group_by(FinancialData.entity)
+            AggDimensionSummary.dim_type == "customer",
+        )
         if department:
-            cust_stmt = cust_stmt.where(FinancialData.entity == department)
+            cust_stmt = cust_stmt.where(AggDimensionSummary.bgbu == department)
+        cust_stmt = cust_stmt.group_by(AggDimensionSummary.dim_value)
         cust_result = await db.execute(cust_stmt)
-        customer_totals = {r.entity: float(r.total or 0) for r in cust_result.all()}
+        customer_totals = {r.dim_value: float(r.total or 0) for r in cust_result.all()}
         total_revenue = sum(customer_totals.values())
         if total_revenue > 0:
             for cust, cust_rev in customer_totals.items():
@@ -296,7 +344,7 @@ class TransactionService:
                         "value": round(cust_rev, 2),
                         "alert_level": "yellow",
                         "entity": cust,
-                        "message": f"客户{cust}营收占比{ratio*100:.2f}% > 30%，集中度风险",
+                        "message": f"客户{cust}营收占比{ratio * 100:.2f}% > 30%，集中度风险",
                     })
 
         anomalies.sort(key=lambda x: x.get("sigma_distance", 0), reverse=True)
@@ -308,24 +356,37 @@ class TransactionService:
         department: str | None = None,
     ) -> tuple[list[dict], int]:
         stmt = select(
-            FinancialData.metric_name, FinancialData.metric_value,
-            FinancialData.period, FinancialData.entity,
+            AggOrderSummary.order_id,
+            AggOrderSummary.period,
+            AggOrderSummary.revenue,
+            AggOrderSummary.cost,
+            AggOrderSummary.gross_profit,
+            AggOrderSummary.dim_dept,
+            AggOrderSummary.dim_product,
         ).where(
-            FinancialData.metric_value >= threshold,
+            AggOrderSummary.revenue >= threshold,
         )
         if department:
-            stmt = stmt.where(FinancialData.entity == department).order_by(FinancialData.metric_value.desc())
+            stmt = stmt.where(AggOrderSummary.bgbu == department)
 
         total_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await db.execute(total_stmt)).scalar() or 0
 
         offset = (page - 1) * page_size
-        stmt = stmt.offset(offset).limit(page_size)
+        stmt = stmt.order_by(AggOrderSummary.revenue.desc()).offset(offset).limit(page_size)
         result = await db.execute(stmt)
 
         items = [
-            {"metric_name": r.metric_name, "metric_value": float(r.metric_value),
-             "period": r.period, "entity": r.entity}
+            {
+                "metric_name": "order_revenue",
+                "metric_value": float(r.revenue or 0),
+                "period": r.period,
+                "entity": r.dim_dept or "",
+                "order_id": r.order_id,
+                "cost": float(r.cost or 0),
+                "gross_profit": float(r.gross_profit or 0),
+                "product": r.dim_product or "",
+            }
             for r in result.all()
         ]
         return items, total

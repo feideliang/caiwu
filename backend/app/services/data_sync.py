@@ -23,6 +23,7 @@ from app.models.core import (
     QualityStatus,
     SyncStatus,
 )
+from app.services.metrics_service import compute_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -327,6 +328,7 @@ class DataSyncService:
                 entity=entity,
                 tags=row_tags if row_tags else None,
                 raw_row=dict(row) if not row.empty else None,
+                bucket=compute_bucket(metric_name),
             )
             self.db.add(record)
             return "inserted"
@@ -376,6 +378,7 @@ class DataSyncService:
                 "entity": str(row.get("entity", "")) or None,
                 "tags": row_tags if row_tags else None,
                 "raw_row": dict(row) if not row.empty else None,
+                "bucket": compute_bucket(metric_name),
             })
         return records
 
@@ -385,6 +388,7 @@ class DataSyncService:
             await cache_delete_pattern("dao:*")
             await cache_delete_pattern("dashboard:*")
             await cache_delete_pattern("query:*")
+            await cache_delete_pattern("metrics:*")
             logger.info("Cache invalidated after sync")
         except Exception as exc:
             logger.warning("Cache invalidation skipped: %s", exc)

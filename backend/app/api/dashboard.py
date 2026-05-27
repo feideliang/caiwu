@@ -2,39 +2,36 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select, desc, or_
+from sqlalchemy import func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.cache import cache_get, cache_set, DEFAULT_TTL
 from app.core.exceptions import ResourceNotFoundError
 from app.core.response import APIResponse
-from app.core.security import get_current_user
+from app.core.security import TokenPayload, get_current_user
 from app.db.session import get_db
-from app.models.core import ChartConfig, DashboardLayout, FinancialData
+from app.models.core import AggDimensionSummary, AggPeriodSummary, ChartConfig, DashboardLayout
 from app.models.v3 import Insight
 from app.schemas.query import DashboardBFFRequest, DashboardBFFResponse, ChartDataItem, KpiData, BreakdownItem
+from app.services.metrics_service import MetricsService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
-def _metric_filters(*keywords: str):
-    return or_(*[FinancialData.metric_name.ilike(f"%{keyword}%") for keyword in keywords])
-
-
-async def _periods(db: AsyncSession, limit: int = 12, department: str | None = None, product: str | None = None) -> list[str]:
-    from sqlalchemy import text
-    filters = []
-    if department:
-        filters.append(FinancialData.entity == department)
-    if product:
-        filters.append(text("tags->>'product_line' = :prod OR tags->>'product' = :prod OR tags->>'series' = :prod"))
-    stmt = select(FinancialData.period).distinct().where(*filters).order_by(desc(FinancialData.period)).limit(limit)
-    if product:
-        stmt = stmt.params(prod=product)
+async def _periods(db: AsyncSession, limit: int = 12, department: str | None = None, product: str | None = None, user: TokenPayload | None = None) -> list[str]:
+    bgbu = (user.department if (user and user.role != "admin" and user.department) else "ALL")
+    stmt = (
+        select(AggPeriodSummary.period)
+        .where(AggPeriodSummary.bgbu == bgbu)
+        .distinct()
+        .order_by(desc(AggPeriodSummary.period))
+        .limit(limit)
+    )
     return [row[0] for row in (await db.execute(stmt)).all() if row[0]]
 
 
@@ -50,246 +47,82 @@ async def _build_kpis(
     period_compare_type: str | None = None,
     period_dimension: str | None = None,
     period: str | None = None,
+    period_start: str | None = None,
+    period_end: str | None = None,
     department: str | None = None,
     product: str | None = None,
+    user: TokenPayload | None = None,
 ) -> dict:
-    # Build base filters
-    base_filters = []
-    if department:
-        base_filters.append(FinancialData.entity == department)
-    if product:
-        from sqlalchemy import text
-        product_filter = text(
-            "(tags->>'product_line' = :prod OR tags->>'product' = :prod OR tags->>'series' = :prod)"
-        ).bindparams(prod=product)
-        base_filters.append(product_filter)
+    from app.db.session import async_session_factory
 
-    trend_periods = await _periods(db, limit=36, department=department, product=product)
+    compare_mode = period_compare_type or "yoy"
 
-    # Determine current period based on period_dimension
-    # cumulative mode: period is a year string like "2026"
-    # monthly mode: period is a month string like "2026-03"
-    if period_dimension in ('yearly', 'cumulative') and period and len(period) == 4:
-        current_period = period
-    else:
-        current_period = period if period else (trend_periods[0] if trend_periods else None)
-
-    # If explicit period not in trend_periods list, add it (skip for year-only periods)
-    if period and period not in trend_periods and len(period) >= 7:
-        trend_periods.insert(0, period)
-    previous_period = trend_periods[1] if len(trend_periods) > 1 else None
-
-    # Compute YoY period
+    # Compute YoY period: subtract 1 year from the requested period string
     yoy_period = None
-    if current_period and len(current_period) >= 7:
-        # Format: "2026-03" or "2026-Q1"
-        year = int(current_period[:4])
-        rest = current_period[5:]
-        yoy_period = f"{year - 1}-{rest}"
-    elif current_period and len(current_period) == 4:
-        # Year-only: YoY is previous year
-        yoy_period = str(int(current_period) - 1)
+    if period and len(period) >= 7:
+        try:
+            year = int(period[:4])
+            yoy_period = f"{year - 1}{period[4:]}"
+        except ValueError:
+            pass
 
-    # Query all needed periods: current, previous, YoY, and all for cumulative YTD
-    query_periods = set(trend_periods[:12])
-    if yoy_period:
-        query_periods.add(yoy_period)
-    # For YTD cumulative, get all periods from year start
-    if current_period and len(current_period) >= 4:
-        year_prefix = current_period[:4]
-        ytd_periods = [p for p in trend_periods if p and p.startswith(year_prefix)]
-        query_periods.update(ytd_periods)
-        # Last year's YTD
-        ytd_periods_ly = [p for p in trend_periods if p and p.startswith(f"{int(year_prefix)-1}")]
-        query_periods.update(ytd_periods_ly)
+    # Determine dimension based on active filters
+    if product:
+        dim = "product_line"
+    elif department:
+        dim = "department"
+    else:
+        dim = "company"
 
-    query_periods_list = list(query_periods)
+    # Helper to run metrics query with independent session
+    bgbu_filter = (user.department if (user and user.role != "admin" and user.department) else "ALL")
 
-    # Batch query: sum all metric types for all needed periods in one query.
-    all_metrics = {}
-    if query_periods_list:
-        stmt = (
-            select(
-                FinancialData.period,
-                FinancialData.metric_name,
-                func.coalesce(func.sum(FinancialData.metric_value), 0).label("total"),
+    async def _run_metrics(period_arg, compare_arg):
+        async with async_session_factory() as session:
+            return await MetricsService.get_core_metrics(
+                db=session,
+                period=period_arg,
+                dimension=dim,
+                compare=compare_arg,
+                period_dimension=period_dimension or "monthly",
+                period_start=period_start,
+                period_end=period_end,
+                product=product,
+                department=department,
+                bgbu_filter=bgbu_filter,
+                sections={"summary", "trend_series"},
             )
-            .where(FinancialData.period.in_(query_periods_list), *base_filters)
-            .group_by(FinancialData.period, FinancialData.metric_name)
-        )
-        rows = (await db.execute(stmt)).all()
-        for period, metric_name, total in rows:
-            all_metrics.setdefault(period, {})[metric_name] = float(total)
 
-    def _sum(period: str | None, *keywords: str) -> float:
-        if not period:
-            return 0.0
-        # Keywords that should NOT be matched as revenue (avoid target_revenue etc.)
-        _EXCLUDE_PREFIXES = ("target_", "预算", "plan_")
-
-        def _match(mname: str) -> bool:
-            low = mname.lower()
-            for kw in keywords:
-                if kw.lower() == low:
-                    return True
-                if kw.lower() in low and not any(low.startswith(p) for p in _EXCLUDE_PREFIXES):
-                    return True
-            return False
-
-        # Year-only period (e.g., "2026") → sum all months in that year
-        if len(period) == 4 and period.isdigit():
-            total = 0.0
-            for p, pdata in all_metrics.items():
-                if p.startswith(f"{period}-"):
-                    for mname, val in pdata.items():
-                        if _match(mname):
-                            total += val
-            return total
-        period_data = all_metrics.get(period, {})
-        for mname, val in period_data.items():
-            if _match(mname):
-                return val
-        return 0.0
-
-    # Current period
-    revenue = _sum(current_period, *_REVENUE_KW)
-    cost = _sum(current_period, *_COST_KW)
-    gross_profit = revenue - cost if (revenue or cost) else _sum(current_period, *_PROFIT_KW)
-    gross_margin = round((gross_profit / revenue * 100), 2) if revenue else 0.0
-    target_revenue = _sum(current_period, *_TARGET_KW)
-    achievement_rate = round((revenue / target_revenue * 100), 2) if target_revenue else 0.0
-
-    # MoM (month-over-month) - previous period
-    prev_revenue = _sum(previous_period, *_REVENUE_KW) if previous_period else 0.0
-    prev_profit = _sum(previous_period, *_PROFIT_KW) if previous_period else 0.0
-    revenue_mom_growth = round(((revenue - prev_revenue) / prev_revenue * 100), 2) if prev_revenue else 0.0
-    profit_mom_growth = round(((gross_profit - prev_profit) / prev_profit * 100), 2) if prev_profit else 0.0
-
-    # YoY (year-over-year)
-    yoy_revenue = _sum(yoy_period, *_REVENUE_KW) if yoy_period else 0.0
-    yoy_cost = _sum(yoy_period, *_COST_KW) if yoy_period else 0.0
-    yoy_profit = _sum(yoy_period, *_PROFIT_KW) if yoy_period else 0.0
-    yoy_gross_margin = round((yoy_profit / yoy_revenue * 100), 2) if yoy_revenue else 0.0
-    revenue_yoy_growth = round(((revenue - yoy_revenue) / yoy_revenue * 100), 2) if yoy_revenue else 0.0
-    cost_yoy_growth = round(((cost - yoy_cost) / yoy_cost * 100), 2) if yoy_cost else 0.0
-    profit_yoy_growth = round(((gross_profit - yoy_profit) / yoy_profit * 100), 2) if yoy_profit else 0.0
-    gross_margin_yoy_change = round(gross_margin - yoy_gross_margin, 2) if yoy_revenue else 0.0
-
-    # Cumulative YTD
-    year_prefix = current_period[:4] if current_period else None
-    ytd_periods = [p for p in all_metrics.keys() if p and p.startswith(year_prefix)] if year_prefix else []
-    ytd_revenue = sum(_sum(p, *_REVENUE_KW) for p in ytd_periods)
-    ytd_profit = sum((_sum(p, *_REVENUE_KW) - _sum(p, *_COST_KW)) for p in ytd_periods)
-
-    ytd_periods_ly = [p for p in all_metrics.keys() if p and p.startswith(f"{int(year_prefix)-1}")] if year_prefix else []
-    ytd_revenue_ly = sum(_sum(p, *_REVENUE_KW) for p in ytd_periods_ly)
-    ytd_profit_ly = sum((_sum(p, *_REVENUE_KW) - _sum(p, *_COST_KW)) for p in ytd_periods_ly)
-
-    revenue_cumulative_growth = round(((ytd_revenue - ytd_revenue_ly) / ytd_revenue_ly * 100), 2) if ytd_revenue_ly else 0.0
-    profit_cumulative_growth = round(((ytd_profit - ytd_profit_ly) / ytd_profit_ly * 100), 2) if ytd_profit_ly else 0.0
-
-    # Trend series: Jan of previous year to latest month (full year range)
-    sorted_periods = sorted(trend_periods)
-    if sorted_periods:
-        latest = sorted_periods[-1]
-        latest_year = int(latest[:4])
-        start_year = latest_year - 1
-        # Filter periods from Jan of previous year to latest
-        trend_full = [p for p in sorted_periods if p >= f"{start_year}-01" and p <= latest]
-    else:
-        trend_full = []
-
-    def _format_period(tp: str, period_dimension: str | None) -> str:
-        if "-" in tp:
-            try:
-                month = int(tp.split('-')[1])
-                return f"{month}月"
-            except ValueError:
-                pass
-        return tp
-
-    # Drill-down trend series: year→months, month→weeks, week→days
-    trend_series = []
-
-    if period_dimension == "yearly" and current_period and len(current_period) == 4:
-        # Year → show each month
-        year_prefix = current_period
-        months_in_year = [p for p in trend_full if p.startswith(f"{year_prefix}-")]
-        for tp in months_in_year:
-            tr = _sum(tp, *_REVENUE_KW)
-            tc = _sum(tp, *_COST_KW)
-            tg = tr - tc
-            tm = round((tg / tr * 100), 2) if tr else 0.0
-            month_num = int(tp.split('-')[1]) if '-' in tp else 0
-            trend_series.append({
-                "period": f"{month_num}月",
-                "revenue": round(tr, 2),
-                "cost": round(tc, 2),
-                "gross_profit": round(tg, 2),
-                "gross_margin": tm,
-            })
-    elif period_dimension == "monthly" and current_period:
-        # Month → split into 4 weeks
-        tr = _sum(current_period, *_REVENUE_KW)
-        tc = _sum(current_period, *_COST_KW)
-        tg = tr - tc
-        tm = round((tg / tr * 100), 2) if tr else 0.0
-        for w in range(1, 5):
-            trend_series.append({
-                "period": f"第{w}周",
-                "revenue": round(tr / 4, 2),
-                "cost": round(tc / 4, 2),
-                "gross_profit": round(tg / 4, 2),
-                "gross_margin": tm,
-            })
-    elif period_dimension == "weekly" and current_period:
-        # Week → split into 7 days
-        # Resolve week to month, then split monthly total
-        tr = _sum(current_period, *_REVENUE_KW)
-        tc = _sum(current_period, *_COST_KW)
-        tg = tr - tc
-        tm = round((tg / tr * 100), 2) if tr else 0.0
-        day_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-        for label in day_labels:
-            trend_series.append({
-                "period": label,
-                "revenue": round(tr / 28, 2),
-                "cost": round(tc / 28, 2),
-                "gross_profit": round(tg / 28, 2),
-                "gross_margin": tm,
-            })
-    else:
-        # Default: show months as trend
-        for tp in trend_full:
-            tr = _sum(tp, *_REVENUE_KW)
-            tc = _sum(tp, *_COST_KW)
-            tg = tr - tc
-            tm = round((tg / tr * 100), 2) if tr else 0.0
-            trend_series.append({
-                "period": _format_period(tp, period_dimension),
-                "revenue": round(tr, 2),
-                "cost": round(tc, 2),
-                "gross_profit": round(tg, 2),
-                "gross_margin": tm,
-            })
-
+    # Parallel execution with independent sessions
+    current, yoy = await asyncio.gather(
+        _run_metrics(period, compare_mode),
+        _run_metrics(yoy_period, "yo"),
+    )
+    summary = current.summary
+    yoy_summary = yoy.summary
     return {
-        "revenue": round(revenue, 2),
-        "cost": round(cost, 2),
-        "gross_profit": round(gross_profit, 2),
-        "gross_margin": gross_margin,
-        "achievement_rate": round(achievement_rate, 2),
-        "revenue_mom_growth": revenue_mom_growth,
-        "profit_mom_growth": profit_mom_growth,
-        "cost_yoy_growth": cost_yoy_growth,
-        "revenue_yoy_growth": revenue_yoy_growth,
-        "profit_yoy_growth": profit_yoy_growth,
-        "gross_margin_yoy_change": gross_margin_yoy_change,
-        "revenue_cumulative": round(ytd_revenue, 2),
-        "profit_cumulative": round(ytd_profit, 2),
-        "revenue_cumulative_growth": revenue_cumulative_growth,
-        "profit_cumulative_growth": profit_cumulative_growth,
-        "trend_series": trend_series,
+        "revenue": round(summary.revenue or 0, 2),
+        "cost": round(summary.tax_excluded_cost or 0, 2),
+        "gross_profit": round(summary.gross_profit or 0, 2),
+        "gross_margin": round(summary.gross_margin or 0, 2),
+        "achievement_rate": round(summary.achievement_rate or 0, 2),
+        "revenue_mom_growth": round(summary.revenue_mom_growth, 2) if summary.revenue_mom_growth is not None else None,
+        "profit_mom_growth": round(summary.gross_profit_mom_growth, 2) if summary.gross_profit_mom_growth is not None else None,
+        "cost_yoy_growth": round(summary.cost_yoy_growth, 2) if summary.cost_yoy_growth is not None else None,
+        "revenue_yoy_growth": round(summary.revenue_yoy_growth, 2) if summary.revenue_yoy_growth is not None else None,
+        "profit_yoy_growth": round(summary.gross_profit_yoy_growth, 2) if summary.gross_profit_yoy_growth is not None else None,
+        "gross_margin_yoy_change": round((summary.gross_margin or 0) - (yoy_summary.gross_margin or 0), 2) if (summary.gross_margin is not None and yoy_summary.gross_margin is not None) else None,
+        "base_revenue": round(yoy_summary.revenue or 0, 2),
+        "base_gross_profit": round(yoy_summary.gross_profit or 0, 2),
+        "base_gross_margin": round(yoy_summary.gross_margin or 0, 2),
+        "base_achievement_rate": round(yoy_summary.achievement_rate or 0, 2),
+        "revenue_cumulative": round(summary.revenue or 0, 2) if period_dimension == "cumulative" else 0.0,
+        "profit_cumulative": round(summary.gross_profit or 0, 2) if period_dimension == "cumulative" else 0.0,
+        "revenue_cumulative_growth": round(summary.revenue_yoy_growth, 2) if (period_dimension == "cumulative" and summary.revenue_yoy_growth is not None) else None,
+        "profit_cumulative_growth": round(summary.gross_profit_yoy_growth, 2) if (period_dimension == "cumulative" and summary.gross_profit_yoy_growth is not None) else None,
+        "revenue_consecutive_growth": summary.revenue_consecutive_growth if period_dimension != "monthly" else None,
+        "gross_profit_consecutive_growth": summary.gross_profit_consecutive_growth if period_dimension != "monthly" else None,
+        "trend_series": [point.model_dump() for point in current.trend_series],
     }
 
 
@@ -300,127 +133,51 @@ async def _build_dimension_breakdowns(
     period_compare_type: str | None = None,
     period_dimension: str | None = None,
     period: str | None = None,
+    period_start: str | None = None,
+    period_end: str | None = None,
+    user: TokenPayload | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Build department and product breakdowns from FinancialData.
+    from app.db.session import async_session_factory
 
-    Returns (department_breakdown, product_breakdown).
-    """
-    all_periods = await _periods(db, limit=12, department=department, product=product)
+    bgbu_filter = (user.department if (user and user.role != "admin" and user.department) else "ALL")
 
-    # Use explicit period if provided, otherwise latest
-    if period_dimension in ('yearly', 'cumulative') and period and len(period) == 4:
-        current_period = period
-    else:
-        current_period = period if period else (all_periods[0] if all_periods else None)
+    # Helper to run metrics query with independent session
+    async def _run_metrics(dimension_arg):
+        async with async_session_factory() as session:
+            return await MetricsService.get_core_metrics(
+                db=session,
+                period=period,
+                dimension=dimension_arg,
+                compare=period_compare_type or "yoy",
+                period_dimension=period_dimension or "monthly",
+                period_start=period_start,
+                period_end=period_end,
+                product=product,
+                department=department,
+                bgbu_filter=bgbu_filter,
+                sections={"breakdowns"},
+            )
 
-    if not current_period:
-        return [], []
-
-    # For yearly mode, query all months in the year
-    if period_dimension in ('yearly', 'cumulative') and len(current_period) == 4:
-        stmt = select(FinancialData).where(FinancialData.period.like(f"{current_period}-%"))
-    else:
-        stmt = select(FinancialData).where(FinancialData.period == current_period)
-    if department:
-        stmt = stmt.where(FinancialData.entity == department)
-    rows = (await db.execute(stmt)).scalars().all()
-
-    # Aggregate by department (from tags.department or entity)
-    dept_buckets: dict[str, dict[str, float]] = {}
-    # Aggregate by product (from tags.product_line / product / series)
-    prod_buckets: dict[str, dict[str, float]] = {}
-
-    for row in rows:
-        tags = row.tags or {}
-        # Filter by product if specified
-        if product:
-            row_product = tags.get("product_line") or tags.get("product") or tags.get("series")
-            if row_product != product:
-                continue
-        bucket_name: str | None = None
-        if "revenue" in row.metric_name.lower() or "营业收入" in row.metric_name or "sales" in row.metric_name.lower():
-            bucket_name = "revenue"
-        elif "cost" in row.metric_name.lower() or "成本" in row.metric_name or "不含税" in row.metric_name:
-            bucket_name = "cost"
-        elif "gross_profit" in row.metric_name.lower() or "毛利润" in row.metric_name or "gross profit" in row.metric_name.lower():
-            bucket_name = "gross_profit"
-
-        if bucket_name is None:
-            continue
-
-        v = float(row.metric_value or 0.0)
-
-        # Department dimension
-        dept = tags.get("department") or row.entity
-        if dept:
-            dept_buckets.setdefault(dept, {"revenue": 0.0, "cost": 0.0, "gross_profit": 0.0})
-            dept_buckets[dept][bucket_name] += v
-
-        # Product dimension
-        row_product = tags.get("product_line") or tags.get("product") or tags.get("series")
-        if row_product:
-            prod_buckets.setdefault(row_product, {"revenue": 0.0, "cost": 0.0, "gross_profit": 0.0})
-            prod_buckets[row_product][bucket_name] += v
-
-    # Build department breakdown
-    total_gp_dept = sum(
-        (b.get("gross_profit") or 0) if b.get("gross_profit") is not None
-        else ((b.get("revenue", 0) - b.get("cost", 0)) if b.get("revenue") is not None and b.get("cost") is not None else 0)
-        for b in dept_buckets.values()
+    # Parallel execution with independent sessions
+    dept_response, prod_response = await asyncio.gather(
+        _run_metrics("department"),
+        _run_metrics("product_line"),
     )
-    dept_items: list[dict] = []
-    for dim_value, bk in sorted(dept_buckets.items(), key=lambda x: x[1].get("revenue", 0), reverse=True):
-        d_rev = bk.get("revenue")
-        d_cost = bk.get("cost")
-        d_gp = bk.get("gross_profit")
-        if d_gp is None and d_rev is not None and d_cost is not None:
-            d_gp = d_rev - d_cost
-        d_gm = (d_gp / d_rev * 100) if (d_gp is not None and d_rev) else None
-        contrib = (d_gp / total_gp_dept * 100) if (d_gp is not None and total_gp_dept) else None
-        dept_items.append({
-            "dimension_value": str(dim_value),
-            "revenue": round(d_rev, 2) if d_rev is not None else None,
-            "tax_excluded_cost": round(d_cost, 2) if d_cost is not None else None,
-            "gross_profit": round(d_gp, 2) if d_gp is not None else None,
-            "gross_margin": round(d_gm, 2) if d_gm is not None else None,
-            "gross_margin_contribution": round(contrib, 2) if contrib is not None else None,
-        })
-
-    # Build product breakdown
-    total_gp_prod = sum(
-        (b.get("gross_profit") or 0) if b.get("gross_profit") is not None
-        else ((b.get("revenue", 0) - b.get("cost", 0)) if b.get("revenue") is not None and b.get("cost") is not None else 0)
-        for b in prod_buckets.values()
+    return (
+        [item.model_dump() for item in dept_response.breakdowns],
+        [item.model_dump() for item in prod_response.breakdowns],
     )
-    prod_items: list[dict] = []
-    for dim_value, bk in sorted(prod_buckets.items(), key=lambda x: x[1].get("gross_profit", 0) or 0, reverse=True):
-        d_rev = bk.get("revenue")
-        d_cost = bk.get("cost")
-        d_gp = bk.get("gross_profit")
-        if d_gp is None and d_rev is not None and d_cost is not None:
-            d_gp = d_rev - d_cost
-        d_gm = (d_gp / d_rev * 100) if (d_gp is not None and d_rev) else None
-        contrib = (d_gp / total_gp_prod * 100) if (d_gp is not None and total_gp_prod) else None
-        prod_items.append({
-            "dimension_value": str(dim_value),
-            "revenue": round(d_rev, 2) if d_rev is not None else None,
-            "tax_excluded_cost": round(d_cost, 2) if d_cost is not None else None,
-            "gross_profit": round(d_gp, 2) if d_gp is not None else None,
-            "gross_margin": round(d_gm, 2) if d_gm is not None else None,
-            "gross_margin_contribution": round(contrib, 2) if contrib is not None else None,
-        })
-
-    return dept_items, prod_items
 
 
 @router.post("/bff", response_model=APIResponse)
 async def dashboard_bff(
     body: DashboardBFFRequest,
     db: AsyncSession = Depends(get_db),
-    _user = Depends(get_current_user),
+    user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
     """Fetch a complete dashboard with chart data, optimized for the target device."""
-    cache_key = f"dashboard:bff:{body.dashboard_id or 'default'}:{body.device_type}:{body.period or ''}:{body.period_dimension or ''}:{body.department or ''}:{body.product or ''}"
+    dept_scope = user.department or ""
+    cache_key = f"dashboard:bff:{body.dashboard_id or 'default'}:{body.device_type}:{body.period or ''}:{body.period_dimension or ''}:{body.department or ''}:{body.product or ''}:{dept_scope}"
 
     if not body.bypass_cache:
         try:
@@ -431,12 +188,12 @@ async def dashboard_bff(
             pass
 
     try:
-        return await _build_dashboard_response(body, db, cache_key)
+        return await _build_dashboard_response(body, db, cache_key, user)
     except Exception:
         raise
 
 
-async def _build_dashboard_response(body, db: AsyncSession, cache_key: str) -> APIResponse:
+async def _build_dashboard_response(body, db: AsyncSession, cache_key: str, user: TokenPayload) -> APIResponse:
     # Load layout
     stmt = select(DashboardLayout).where(DashboardLayout.device_type == body.device_type)
     if body.dashboard_id:
@@ -479,27 +236,72 @@ async def _build_dashboard_response(body, db: AsyncSession, cache_key: str) -> A
                 if m not in all_metric_names:
                     all_metric_names.append(m)
         if all_metric_names:
-            stmt = select(
-                FinancialData.metric_name, FinancialData.metric_value, FinancialData.period,
-                FinancialData.entity, FinancialData.tags,
-            ).where(FinancialData.metric_name.in_(all_metric_names))
-            # Apply period filter
-            if body.period:
-                stmt = stmt.where(FinancialData.period == body.period)
-            # Apply department filter
+            bgbu_filter = (user.department if (user and user.role != "admin" and user.department) else "ALL")
+            # Map chart metric keywords to agg column names
+            _METRIC_TO_COL = {
+                "revenue": "revenue", "营业收入": "revenue", "sales": "revenue",
+                "cost": "cost", "成本": "cost", "expense": "cost",
+                "gross_profit": "gross_profit", "毛利润": "gross_profit", "gross profit": "gross_profit",
+                "target_revenue": "target_revenue", "目标收入": "target_revenue", "预算收入": "target_revenue",
+            }
+
+            agg_cols: list[str] = []
+            for m in all_metric_names:
+                col = _METRIC_TO_COL.get(m.lower())
+                if col and col not in agg_cols:
+                    agg_cols.append(col)
+
+            all_rows: list[dict] = []
+
+            # Determine the effective bgbu filter for chart data
+            # When department filter is active, scope to that department
+            # When product filter is active, read from dim_summary instead
             if body.department:
-                stmt = stmt.where(FinancialData.entity == body.department)
-            # Apply product filter
+                eff_bgbu = body.department
+            elif bgbu_filter != "ALL":
+                eff_bgbu = bgbu_filter
+            else:
+                eff_bgbu = "ALL"
+
             if body.product:
-                from sqlalchemy import text
-                prod_filter = text("tags->>'product_line' = :prod OR tags->>'product' = :prod OR tags->>'series' = :prod")
-                stmt = stmt.where(prod_filter).params(prod=body.product)
-            stmt = stmt.order_by(FinancialData.period)
-            rows = (await db.execute(stmt)).all()
-            # Build lookup: metric_name -> list of {metric_name, metric_value, period}
+                # Product filter: read from AggDimensionSummary with product_line dim_type
+                stmt_chart = (
+                    select(AggDimensionSummary)
+                    .where(
+                        AggDimensionSummary.dim_type == "product_line",
+                        AggDimensionSummary.dim_value == body.product,
+                    )
+                )
+                if body.period:
+                    stmt_chart = stmt_chart.where(AggDimensionSummary.period == body.period)
+                if body.department or bgbu_filter != "ALL":
+                    stmt_chart = stmt_chart.where(AggDimensionSummary.bgbu == eff_bgbu)
+                chart_rows = (await db.execute(stmt_chart)).scalars().all()
+                for r in chart_rows:
+                    for m in all_metric_names:
+                        col = _METRIC_TO_COL.get(m.lower())
+                        if col and hasattr(r, col):
+                            val = getattr(r, col, 0) or 0
+                            if val:
+                                all_rows.append({"metric_name": m, "metric_value": val, "period": r.period, "entity": r.dim_value})
+            else:
+                # Company/department level: read from AggPeriodSummary
+                stmt_chart = select(AggPeriodSummary).where(AggPeriodSummary.bgbu == eff_bgbu)
+                if body.period:
+                    stmt_chart = stmt_chart.where(AggPeriodSummary.period == body.period)
+                chart_rows = (await db.execute(stmt_chart)).scalars().all()
+                for r in chart_rows:
+                    for m in all_metric_names:
+                        col = _METRIC_TO_COL.get(m.lower())
+                        if col and hasattr(r, col):
+                            val = getattr(r, col, 0) or 0
+                            if val:
+                                all_rows.append({"metric_name": m, "metric_value": val, "period": r.period, "entity": r.bgbu})
+
+            # Build lookup: metric_name -> list of {metric_name, metric_value, period, entity}
             metric_rows: dict[str, list[dict]] = {}
-            for r in rows:
-                metric_rows.setdefault(r[0], []).append({"metric_name": r[0], "metric_value": r[1], "period": r[2]})
+            for r in all_rows:
+                metric_rows.setdefault(r["metric_name"], []).append(r)
             # Assign to each chart config based on its metrics
             for cc in chart_configs:
                 metrics = (cc.get("config") or {}).get("metrics", [])
@@ -518,13 +320,37 @@ async def _build_dashboard_response(body, db: AsyncSession, cache_key: str) -> A
             options=cc.get("config"),
         ))
 
-    dept_items, prod_items = await _build_dimension_breakdowns(db, department=body.department, product=body.product)
+    # Parallel execution of KPIs and dimension breakdowns
+    kpis_result, (dept_items, prod_items) = await asyncio.gather(
+        _build_kpis(
+            db,
+            body.period_compare_type,
+            period_dimension=body.period_dimension,
+            period=body.period,
+            period_start=body.period_start,
+            period_end=body.period_end,
+            department=body.department,
+            product=body.product,
+            user=user,
+        ),
+        _build_dimension_breakdowns(
+            db,
+            department=body.department,
+            product=body.product,
+            period_compare_type=body.period_compare_type,
+            period_dimension=body.period_dimension,
+            period=body.period,
+            period_start=body.period_start,
+            period_end=body.period_end,
+            user=user,
+        ),
+    )
 
     response_data = DashboardBFFResponse(
         dashboard_id=layout.id,
         dashboard_name=layout.name,
         device_type=body.device_type,
-        kpis=KpiData(**(await _build_kpis(db, body.period_compare_type, period_dimension=body.period_dimension, period=body.period, department=body.department, product=body.product))),
+        kpis=KpiData(**kpis_result),
         charts=chart_data_items,
         layout=layout.layout_config,
         updated_at=datetime.now(timezone.utc).isoformat(),
@@ -532,7 +358,10 @@ async def _build_dashboard_response(body, db: AsyncSession, cache_key: str) -> A
         product_breakdown=prod_items,
     ).model_dump()
 
-    await cache_set(cache_key, response_data, DEFAULT_TTL)
+    try:
+        await cache_set(cache_key, response_data, DEFAULT_TTL)
+    except Exception:
+        pass
     return APIResponse.success(data=response_data)
 
 

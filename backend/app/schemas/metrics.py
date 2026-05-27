@@ -5,22 +5,59 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class MarginChangeSummary(BaseModel):
+    continuing_structure_impact: float | None = None
+    continuing_margin_impact: float | None = None
+    new_impact: float | None = None
+    exit_impact: float | None = None
+    continuing_structure_impact_mom: float | None = None
+    continuing_margin_impact_mom: float | None = None
+    new_impact_mom: float | None = None
+    exit_impact_mom: float | None = None
+
+
+class MarginChangeItem(BaseModel):
+    dimension_value: str
+    category: str
+    current_revenue: float | None = None
+    current_share: float | None = None
+    current_margin: float | None = None
+    base_revenue: float | None = None
+    base_share: float | None = None
+    base_margin: float | None = None
+    share_change: float | None = None
+    margin_change: float | None = None
+    structure_impact: float | None = None
+    margin_impact: float | None = None
+    total_impact: float | None = None
+
+
 class CoreMetricsSummary(BaseModel):
     revenue: float | None = None
     tax_excluded_cost: float | None = None
     gross_profit: float | None = None
     gross_margin: float | None = None
+    gross_margin_yoy_change: float | None = None
+    gross_margin_mom_change: float | None = None
     gross_margin_contribution: float | None = None
     customer_concentration_top3: float | None = None
+    customer_concentration_top3_change: float | None = None
     product_concentration_top3: float | None = None
+    customer_concentration_top10: float | None = None
+    product_concentration_top10: float | None = None
     high_margin_order_ratio: float | None = None
     top_customer_share: float | None = None
     revenue_consecutive_growth: int | None = None
     gross_profit_consecutive_growth: int | None = None
     gross_margin_volatility: float | None = None
-    margin_change_analysis: list[dict] | None = None  # 毛利率变动影响拆解
+    gross_margin_volatility_change: float | None = None
+    margin_change_analysis: list[MarginChangeItem] | None = None
+    margin_change_summary: MarginChangeSummary | None = None
     revenue_yoy_growth: float | None = None
+    cost_yoy_growth: float | None = None
     gross_profit_yoy_growth: float | None = None
+    base_revenue: float | None = None
+    base_gross_profit: float | None = None
     revenue_mom_growth: float | None = None
     gross_profit_mom_growth: float | None = None
     # New fields for analysis pages
@@ -39,8 +76,12 @@ class CoreMetricsSummary(BaseModel):
     # Negative margin metrics
     negative_margin_order_ratio: float | None = None
     negative_margin_order_amount: float | None = None
+    negative_margin_order_yoy_change: float | None = None
+    negative_margin_order_mom_change: float | None = None
     negative_margin_product_ratio: float | None = None
     negative_margin_product_amount: float | None = None
+    negative_margin_product_yoy_change: float | None = None
+    negative_margin_product_mom_change: float | None = None
 
 
 class BreakdownItem(BaseModel):
@@ -63,13 +104,18 @@ class BreakdownItem(BaseModel):
 class TrendDataPoint(BaseModel):
     period: str
     revenue: float | None = None
-    tax_excluded_cost: float | None = None
+    cost: float | None = None
     gross_profit: float | None = None
     gross_margin: float | None = None
+    order_count: int | None = None
     revenue_mom_growth: float | None = None
     revenue_yoy_growth: float | None = None
     gross_profit_mom_growth: float | None = None
     gross_profit_yoy_growth: float | None = None
+    gross_margin_mom_growth: float | None = None
+    gross_margin_yoy_growth: float | None = None
+    order_count_mom_growth: float | None = None
+    order_count_yoy_growth: float | None = None
 
 
 class DataQuality(BaseModel):
@@ -94,6 +140,7 @@ class CoreMetricsResponse(BaseModel):
     summary: CoreMetricsSummary
     breakdowns: list[BreakdownItem] = Field(default_factory=list)
     customer_breakdown: list[BreakdownItem] = Field(default_factory=list)
+    contract_type_breakdown: list[BreakdownItem] = Field(default_factory=list)
     trend_series: list[TrendDataPoint] = Field(default_factory=list)
     dimension_trend_series: list[DimensionTrendPoint] = Field(default_factory=list)
     data_quality: DataQuality

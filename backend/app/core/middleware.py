@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Any
 
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import settings
 from app.core.exceptions import AppException
@@ -17,20 +18,42 @@ from app.core.response import APIResponse, ErrorCode
 _TRACE_ID_HEADER = "X-Trace-Id"
 
 
-class TraceIDMiddleware(BaseHTTPMiddleware):
-    """Attach a unique X-Trace-Id to every request and response."""
+class TraceIDMiddleware:
+    """Native ASGI middleware: attach a unique X-Trace-Id to every request and response.
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        trace_id = request.headers.get("x-trace-id") or uuid.uuid4().hex[:16]
-        request.state.trace_id = trace_id
+    This replaces the legacy BaseHTTPMiddleware implementation which had
+    performance overhead due to body buffering and anyio task group usage.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        # Extract or generate trace ID
+        headers = dict(scope.get("headers", []))
+        trace_id_bytes = headers.get(b"x-trace-id")
+        trace_id = trace_id_bytes.decode() if trace_id_bytes else uuid.uuid4().hex[:16]
+
+        # Inject trace_id into scope state
+        scope["state"] = {"trace_id": trace_id}
+
+        async def send_with_trace_id(message: dict[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                # Add trace ID header to response
+                headers = list(message.get("headers", []))
+                headers.append((b"x-trace-id", trace_id.encode()))
+                message["headers"] = headers
+            await send(message)
 
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_with_trace_id)
         except Exception as exc:
-            return await _handle_exception(exc, trace_id)
-
-        response.headers[_TRACE_ID_HEADER] = trace_id
-        return response
+            response = await _handle_exception(exc, trace_id)
+            await response(scope, receive, send)
 
 
 async def _handle_exception(exc: Exception, trace_id: str) -> JSONResponse:

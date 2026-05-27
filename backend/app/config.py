@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     def database_url(self) -> str:
         return (
             f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}?ssl=disable"
         )
 
     @property
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         )
 
     # ── Redis ─────────────────────────────────────────────────
-    redis_host: str = "localhost"
+    redis_host: str = "127.0.0.1"
     redis_port: int = 6379
     redis_password: str = ""
     redis_db: int = 0

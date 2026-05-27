@@ -17,6 +17,7 @@
       <template #suffix>
         <span class="unit">{{ unit }}</span>
         <span v-if="trend !== undefined" :class="['trend', trendClass]">
+          <span v-if="trendLabel" class="trend-label">{{ trendLabel }}</span>
           <CaretUpOutlined v-if="trend > 0" />
           <CaretDownOutlined v-else-if="trend < 0" />
           {{ Math.abs(trend) }}{{ trendSuffix }}
@@ -43,6 +44,7 @@ const props = withDefaults(defineProps<{
   precision?: number;
   trend?: number;
   trendSuffix?: string;
+  trendLabel?: string;
   color?: string;
   icon?: Component;
   alert?: 'red' | 'yellow' | 'blue';
@@ -52,6 +54,7 @@ const props = withDefaults(defineProps<{
   precision: 2,
   trend: undefined,
   trendSuffix: '%',
+  trendLabel: undefined,
   color: undefined,
   icon: undefined,
   alert: undefined,
@@ -105,6 +108,11 @@ const cardPadding = computed(() => isSmall.value ? '12px' : '20px 24px');
 .trend {
   margin-left: 8px;
   font-size: 14px;
+}
+
+.trend-label {
+  margin-right: 4px;
+  color: var(--color-text-tertiary, #999);
 }
 
 .alert-badge {

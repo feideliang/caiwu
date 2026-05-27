@@ -12,12 +12,14 @@
     </template>
     <v-chart
       v-if="chartOption && !loading"
+      ref="chartRef"
       class="chart"
       :option="chartOption"
       renderer="canvas"
       autoresize
       :style="{ height: chartHeight }"
       @click="onChartClick"
+      @legendselectchanged="onLegendSelectChanged"
     />
     <a-empty v-else-if="!loading && !chartOption" description="暂无数据" />
   </a-card>
@@ -36,17 +38,24 @@ import 'echarts/lib/component/grid';
 import 'echarts/lib/component/title';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons-vue';
 
+function safeNum(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 const props = withDefaults(defineProps<{
   title: string;
   data?: Record<string, unknown>[];
   chartType?: string;
   loading?: boolean;
   showExtra?: boolean;
+  valueSuffix?: string;
 }>(), {
   data: () => [],
   chartType: 'bar',
   loading: false,
   showExtra: false,
+  valueSuffix: '万元',
 });
 
 const emit = defineEmits<{
@@ -59,6 +68,43 @@ function onChartClick(params: { name?: string }) {
   if (params.name) {
     emit('chart-click', params.name);
   }
+}
+
+const chartRef = ref<any>(null);
+let legendChangeGuard = false;
+
+function onLegendSelectChanged(params: { name: string; selected: Record<string, boolean> }) {
+  if (legendChangeGuard) return;
+
+  const chart = chartRef.value?.chart;
+  if (!chart) return;
+
+  const clickedName = params.name;
+  const isClickedSelected = params.selected[clickedName];
+  const selectedCount = Object.values(params.selected).filter(Boolean).length;
+
+  legendChangeGuard = true;
+
+  if (selectedCount === 0) {
+    // User deselected the last selected item → restore all
+    for (const name of Object.keys(params.selected)) {
+      chart.dispatchAction({ type: 'legendToggleSelect', name });
+    }
+  } else {
+    // Isolate the clicked item
+    if (!isClickedSelected) {
+      // Clicked item was deselected by default toggle → re-select it
+      chart.dispatchAction({ type: 'legendToggleSelect', name: clickedName });
+    }
+    // Deselect all others
+    for (const name of Object.keys(params.selected)) {
+      if (name !== clickedName && params.selected[name]) {
+        chart.dispatchAction({ type: 'legendToggleSelect', name });
+      }
+    }
+  }
+
+  legendChangeGuard = false;
 }
 
 const isMobile = ref(window.innerWidth < 768);
@@ -117,7 +163,7 @@ const chartOption = computed(() => {
           name: key,
           type: 'bar' as const,
           yAxisIndex: 0,
-          data: props.data.map((d) => Math.round(Number(d[key]) / 10000 * 100) / 100),
+          data: props.data.map((d) => Math.round(safeNum(d[key]) / 10000 * 100) / 100),
         })),
         ...(hasMargin ? [{
           name: marginKey || '毛利率',
@@ -146,26 +192,26 @@ const chartOption = computed(() => {
       grid: {
         top: 30,
         bottom: isMobile.value ? 50 : 40,
-        left: isMobile.value ? 40 : 60,
+        left: isMobile.value ? 40 : (mainKeys.length ? 60 : hasMargin ? 80 : 60),
         right: hasMargin ? 60 : 20,
       },
       xAxis: { type: 'category' as const, data: props.data.map((d) => d[xKey]), axisLabel: { rotate: isMobile.value ? 45 : 0 } },
       yAxis: [
-        { type: 'value' as const, name: '万元', position: 'left' as const },
-        ...(hasMargin ? [{ type: 'value' as const, name: '%', position: 'right' as const, max: (v: any) => Math.ceil(v.max * 1.2) }] : []),
+        ...(mainKeys.length ? [{ type: 'value' as const, name: props.valueSuffix, position: 'left' as const, axisLabel: { formatter: (v: number) => Number.isFinite(v) ? v.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '0' } }] : []),
+        ...(hasMargin ? [{ type: 'value' as const, name: '%', position: 'right' as const, max: (v: any) => Math.ceil(v.max * 1.2), axisLabel: { formatter: (v: number) => Number.isFinite(v) ? v.toFixed(2) : '0' } }] : []),
       ],
       series: [
         ...mainKeys.map((key) => ({
           name: legendMap[key] || key,
           type: 'line' as const,
           yAxisIndex: 0,
-          data: props.data.map((d) => Math.round(Number(d[key]) / 10000 * 100) / 100),
+          data: props.data.map((d) => Math.round(safeNum(d[key]) / 10000 * 100) / 100),
           smooth: true,
         })),
         ...(hasMargin ? [{
           name: legendMap.gross_margin,
           type: 'line' as const,
-          yAxisIndex: 1,
+          yAxisIndex: mainKeys.length ? 1 : 0,
           data: props.data.map((d) => d['gross_margin']),
           smooth: true,
           lineStyle: { type: 'dashed' as const },
@@ -176,7 +222,8 @@ const chartOption = computed(() => {
         formatter: (params: any[]) => {
           let s = `${params[0]?.axisValue || ''}<br/>`;
           params.forEach((p: any) => {
-            const val = p.seriesName === '毛利率' ? `${p.value}%` : `${p.value}万元`;
+            const v = Number.isFinite(p.value) ? p.value : 0;
+            const val = p.seriesName === '毛利率' ? `${v}%` : `${v}${props.valueSuffix}`;
             s += `${p.marker} ${p.seriesName}: ${val}<br/>`;
           });
           return s;
@@ -189,7 +236,7 @@ const chartOption = computed(() => {
       return {
         ...baseOption,
         xAxis: { type: 'category' as const, data: props.data.map((d) => d[xKey]), axisLabel: { rotate: isMobile.value ? 45 : 0 } },
-        yAxis: { type: 'value' as const },
+        yAxis: { type: 'value' as const, axisLabel: { formatter: (v: number) => Number.isFinite(v) ? (Number.isInteger(v) ? v.toLocaleString('zh-CN') : v.toFixed(2)) : '0' } },
         series: valueKeys.map((key) => ({
           name: key,
           type: 'line',
@@ -199,6 +246,7 @@ const chartOption = computed(() => {
         })),
       };
     case 'scatter': {
+      if (!valueKeys.length) return null;
       // Scatter/bubble: first value key = x, second = y, third = bubble size (optional)
       const xVal = valueKeys[0];
       const yVal = valueKeys[1] || xVal;
@@ -210,7 +258,7 @@ const chartOption = computed(() => {
         yAxis: { type: 'value' as const, name: yVal },
         series: [{
           type: 'scatter',
-          data: props.data.map((d) => [d[xVal], d[yVal], sizeVal ? d[sizeVal] : 10, d[xKey]]),
+          data: props.data.map((d) => [safeNum(d[xVal]), safeNum(d[yVal]), sizeVal ? safeNum(d[sizeVal]) : 10, d[xKey]]),
           symbolSize: (data: number[]) => sizeVal ? Math.max(10, Math.min(60, data[2] / 10)) : 15,
           label: {
             show: true,
@@ -240,26 +288,63 @@ const chartOption = computed(() => {
       return {
         ...baseOption,
         xAxis: { type: 'category' as const, data: props.data.map((d) => d[xKey]), axisLabel: { rotate: isMobile.value ? 45 : 0 } },
-        yAxis: { type: 'value' as const },
+        yAxis: { type: 'value' as const, axisLabel: { formatter: (v: number) => Number.isFinite(v) ? (Number.isInteger(v) ? v.toLocaleString('zh-CN') : v.toFixed(2)) : '0' } },
         series: valueKeys.map((key) => ({ name: key, type: 'bar', data: props.data.map((d) => d[key]) })),
       };
     case 'grouped-bar': {
+      const hasMargin = valueKeys.includes('毛利率');
+      const barKeys = valueKeys.filter((k) => k !== '毛利率');
       const colorMap: Record<string, string> = { 营业收入: '#1890ff', 毛利额: '#52c41a' };
-      return {
+      const reversedData = [...props.data].reverse();
+      const base = {
         tooltip: { trigger: 'axis' as const },
         legend: { bottom: 0, type: 'scroll' as const },
-        grid: { top: 30, bottom: isMobile.value ? 50 : 40, left: isMobile.value ? 100 : 140, right: 40 },
-        xAxis: { type: 'value' as const, name: '万元' },
+        grid: { top: hasMargin ? 40 : 30, bottom: isMobile.value ? 50 : 40, left: isMobile.value ? 100 : 140, right: hasMargin ? 60 : 40 },
         yAxis: { type: 'category' as const, data: props.data.map((d) => d[xKey]).reverse(), axisLabel: { fontSize: 11 } },
-        series: valueKeys.map((key) => ({
-          name: key,
-          type: 'bar' as const,
-          data: props.data.map((d) => +Math.round(Number(d[key]) / 10000 * 100) / 100).reverse(),
-          itemStyle: { color: colorMap[key] || '#1890ff' },
-        })),
+        series: [
+          ...barKeys.map((key) => ({
+            name: key,
+            type: 'bar' as const,
+            data: reversedData.map((d) => +Math.round(safeNum(d[key]) / 10000 * 100) / 100),
+            itemStyle: { color: colorMap[key] || '#1890ff' },
+            ...(key === '毛利额' && hasMargin ? {
+              label: {
+                show: true,
+                position: 'right',
+                formatter: (params: any) => {
+                  const val = reversedData[params.dataIndex]?.['毛利率'];
+                  return val != null && Number.isFinite(Number(val)) ? `毛利率 ${Number(val).toFixed(2)}%` : '';
+                },
+                fontSize: 11,
+              },
+            } : {}),
+          })),
+          ...(hasMargin ? [{
+            name: '毛利率',
+            type: 'line' as const,
+            xAxisIndex: 1,
+            data: reversedData.map((d) => d['毛利率']),
+            smooth: true,
+            lineStyle: { type: 'dashed' as const, width: 1.5 },
+            symbol: 'diamond',
+            symbolSize: 10,
+            itemStyle: { color: '#faad14' },
+          }] : []),
+        ],
       };
+      if (hasMargin) {
+        return {
+          ...base,
+          xAxis: [
+            { type: 'value' as const, name: '万元' },
+            { type: 'value' as const, name: '%', position: 'top' as const, splitLine: { show: false } },
+          ],
+        };
+      }
+      return { ...base, xAxis: { type: 'value' as const, name: '万元' } };
     }
     case 'pie': {
+      if (!valueKeys.length) return null;
       const pieData = props.data.map((d) => ({ name: String(d[xKey]), value: d[valueKeys[0]] as number }));
       return {
         tooltip: { trigger: 'item' as const },

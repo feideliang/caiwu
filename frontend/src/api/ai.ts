@@ -60,8 +60,12 @@ export function recommendLayout(data: LayoutRecommendParams) {
 
 export interface ChatContext {
   period?: string;
+  period_dimension?: string;
+  period_start?: string;
+  period_end?: string;
   department?: string;
   product?: string;
+  customer?: string;
   period_compare_type?: string;
   active_section?: string;
 }

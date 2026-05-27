@@ -31,7 +31,7 @@
             <a-table :dataSource="store.projects" :columns="projectColumns" rowKey="entity" size="small" :pagination="{ pageSize: 10 }">
               <template #total_revenue="{ text }">{{ formatMoney(text) }}</template>
               <template #total_cost="{ text }">{{ formatMoney(text) }}</template>
-              <template #profit_margin="{ text }">{{ (text * 100).toFixed(1) }}%</template>
+              <template #profit_margin="{ text }">{{ text != null ? `${(text * 100).toFixed(1)}%` : '-' }}</template>
               <template #emptyText><a-empty description="暂无项目数据" /></template>
             </a-table>
           </a-spin>

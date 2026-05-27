@@ -12,8 +12,8 @@ export interface InlineInsight {
 const DIM_LABELS: Record<string, string> = { department: '部门', product_line: '产品线', company: '公司', customer: '客户' };
 
 function wan(v: number | undefined | null): string {
-  if (v == null) return '0.0';
-  return (v / 10000).toFixed(1);
+  if (v == null) return '0';
+  return Math.round(v / 10000).toLocaleString('zh-CN');
 }
 
 export function useInlineInsights(opts: {
@@ -51,7 +51,7 @@ export function useInlineInsights(opts: {
       const best = byMar[0];
       if (best?.gross_margin != null) {
         items.push({
-          title: `${best.dimension_value}${dim}毛利率最优 ${best.gross_margin.toFixed(1)}%`,
+          title: `${best.dimension_value}${dim}毛利率最优 ${best.gross_margin.toFixed(2)}%`,
           calculation: `计算方式：按各${dim}的 gross_margin 字段降序排列取最高值。${best.dimension_value} 的 gross_margin = ${best.gross_margin.toFixed(2)}%`,
           type: best.gross_margin >= 30 ? 'positive' : 'neutral',
           route: { path: dimension === 'department' ? '/department-analysis' : dimension === 'customer' ? '/customer-analysis' : '/product-analysis', query: { entity: best.dimension_value } },
@@ -71,7 +71,7 @@ export function useInlineInsights(opts: {
       const worst = byMar[byMar.length - 1];
       if (worst?.gross_margin != null && worst.gross_margin < 0) {
         items.push({
-          title: `${worst.dimension_value}${dim}毛利率为负 ${worst.gross_margin.toFixed(1)}%`,
+          title: `${worst.dimension_value}${dim}毛利率为负 ${worst.gross_margin.toFixed(2)}%`,
           calculation: `计算方式：按各${dim}的 gross_margin 字段升序排列取最低值。${worst.dimension_value} 的 gross_margin = ${worst.gross_margin.toFixed(2)}%`,
           type: 'negative',
           route: { path: dimension === 'department' ? '/department-analysis' : dimension === 'customer' ? '/customer-analysis' : '/product-analysis', query: { entity: worst.dimension_value } },
@@ -83,7 +83,7 @@ export function useInlineInsights(opts: {
       const fast = byGrw[0];
       if (fast && (fast.revenue_yoy_growth ?? 0) > 0) {
         items.push({
-          title: `${fast.dimension_value}${dim}增速最快 ${(fast.revenue_yoy_growth ?? 0).toFixed(1)}%`,
+          title: `${fast.dimension_value}${dim}增速最快 ${(fast.revenue_yoy_growth ?? 0).toFixed(2)}%`,
           calculation: `计算方式：按各${dim}的 revenue_yoy_growth 字段降序排列取最高值。${fast.dimension_value} 的 revenue_yoy_growth = ${(fast.revenue_yoy_growth ?? 0).toFixed(2)}%`,
           type: 'positive',
           route: { path: dimension === 'department' ? '/department-analysis' : dimension === 'customer' ? '/customer-analysis' : '/product-analysis', query: { entity: fast.dimension_value } },
@@ -104,7 +104,7 @@ export function useInlineInsights(opts: {
         }
         if (s.gross_margin != null) {
           items.push({
-            title: `公司整体毛利率 ${s.gross_margin.toFixed(1)}%`,
+            title: `公司整体毛利率 ${s.gross_margin.toFixed(2)}%`,
             calculation: `计算方式：取自 summary.gross_margin = ${s.gross_margin.toFixed(2)}%`,
             type: s.gross_margin >= 20 ? 'positive' : s.gross_margin >= 0 ? 'warning' : 'negative',
             route: { path: '/trend-analysis' },
@@ -112,7 +112,7 @@ export function useInlineInsights(opts: {
         }
         if (s.revenue_yoy_growth != null) {
           items.push({
-            title: `收入同比${s.revenue_yoy_growth >= 0 ? '增长' : '下滑'} ${Math.abs(s.revenue_yoy_growth).toFixed(1)}%`,
+            title: `收入同比${s.revenue_yoy_growth >= 0 ? '增长' : '下滑'} ${Math.abs(s.revenue_yoy_growth).toFixed(2)}%`,
             calculation: `计算方式：取自 summary.revenue_yoy_growth = ${s.revenue_yoy_growth.toFixed(2)}%`,
             type: s.revenue_yoy_growth >= 0 ? 'positive' : 'negative',
             route: { path: '/trend-analysis' },
@@ -127,7 +127,7 @@ export function useInlineInsights(opts: {
         if (first.revenue != null && last.revenue != null && first.revenue > 0) {
           const g = ((last.revenue - first.revenue) / first.revenue * 100);
           items.push({
-            title: `期间收入${g >= 0 ? '增长' : '下降'} ${g.toFixed(1)}%（${trends.length}期）`,
+            title: `期间收入${g >= 0 ? '增长' : '下降'} ${g.toFixed(2)}%（${trends.length}期）`,
             calculation: `计算方式：(${last.revenue} - ${first.revenue}) / ${first.revenue} * 100 = ${g.toFixed(2)}%。统计区间：${first.period} 至 ${last.period}，共 ${trends.length} 期`,
             type: g >= 0 ? 'positive' : 'negative',
             route: { path: '/trend-analysis' },
@@ -150,7 +150,7 @@ export function useInlineInsights(opts: {
           const mL = mPts[mPts.length - 1];
           const d = mL.gross_margin! - mF.gross_margin!;
           items.push({
-            title: `毛利率${d >= 0 ? '提升' : '下降'} ${Math.abs(d).toFixed(1)} 个百分点`,
+            title: `毛利率${d >= 0 ? '提升' : '下降'} ${Math.abs(d).toFixed(2)} 个百分点`,
             calculation: `计算方式：末期 gross_margin (${mL.gross_margin?.toFixed(2)}%) - 初期 gross_margin (${mF.gross_margin?.toFixed(2)}%) = ${d.toFixed(2)} 个百分点`,
             type: d >= 0 ? 'positive' : 'negative',
             route: { path: '/trend-analysis' },

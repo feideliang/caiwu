@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.exceptions import BusinessError
-from app.models.core import FinancialData
+from app.models.core import AggPeriodSummary
 from app.models.v3 import CorrelationCalibration, CorrelationResult
 
 
@@ -123,6 +123,14 @@ def classify_strength(coefficient: float) -> str:
     return "无"
 
 
+# Mapping from metric names to AggPeriodSummary columns
+_METRIC_COL_MAP = {
+    "revenue": AggPeriodSummary.revenue,
+    "cost": AggPeriodSummary.cost,
+    "gross_profit": AggPeriodSummary.gross_profit,
+}
+
+
 async def _fetch_metric_values(
     db: AsyncSession,
     metric_name: str,
@@ -130,20 +138,25 @@ async def _fetch_metric_values(
     period_end: str | None = None,
     department: str | None = None,
 ) -> list[tuple[str, float]]:
-    """Fetch time-series values for a metric from financial_data."""
-    stmt = select(FinancialData.period, FinancialData.metric_value).where(
-        FinancialData.metric_name == metric_name
-    )
-    if department:
-        stmt = stmt.where(FinancialData.entity == department)
-    if period_start:
-        stmt = stmt.where(FinancialData.period >= period_start)
-    if period_end:
-        stmt = stmt.where(FinancialData.period <= period_end)
-    stmt = stmt.order_by(FinancialData.period)
+    """Fetch time-series values for a metric from agg_period_summary (preferred) or financial_data (fallback)."""
+    agg_col = _METRIC_COL_MAP.get(metric_name)
 
-    result = await db.execute(stmt)
-    return [(row[0], row[1]) for row in result.all()]
+    if agg_col is not None:
+        # Use aggregated table
+        stmt = select(AggPeriodSummary.period, agg_col).where(
+            AggPeriodSummary.bgbu == (department or "ALL")
+        )
+        if period_start:
+            stmt = stmt.where(AggPeriodSummary.period >= period_start)
+        if period_end:
+            stmt = stmt.where(AggPeriodSummary.period <= period_end)
+        stmt = stmt.order_by(AggPeriodSummary.period)
+
+        result = await db.execute(stmt)
+        return [(row[0], float(row[1] or 0)) for row in result.all()]
+
+    # Unknown metric: no data source available (financial_data table is empty)
+    return []
 
 
 async def _ai_explain(

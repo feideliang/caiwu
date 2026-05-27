@@ -1,33 +1,66 @@
 <template>
-  <a-card :title="panelTitle" size="small" class="concentration-panel">
-    <a-list :data-source="topItems" size="small">
-      <template #renderItem="{ item, index }">
-        <a-list-item>
-          <div class="rank-row">
-            <span :class="['rank-badge', index < 3 ? `rank-${index + 1}` : '']">{{ index + 1 }}</span>
-            <span class="name">{{ item.dimension_value }}</span>
-            <div class="metrics">
-              <div class="metric-row">
-                <span class="metric-label">收入</span>
-                <span class="metric-value">{{ formatNumber(item.revenue) }}</span>
-                <a-progress :percent="percent(item.revenue, maxItemRevenue)" :show-info="false" size="small" class="bar" />
+  <a-card title="Top 10 客户集中度排名" size="small" class="concentration-panel">
+    <a-row :gutter="16">
+      <a-col :span="12">
+        <a-list :data-source="leftItems" size="small">
+          <template #renderItem="{ item, index }">
+            <a-list-item>
+              <div class="rank-row">
+                <span :class="['rank-badge', index < 3 ? `rank-${index + 1}` : '']">{{ index + 1 }}</span>
+                <span class="name">{{ item.dimension_value }}</span>
+                <div class="metrics">
+                  <div class="metric-row">
+                    <span class="metric-label">收入</span>
+                    <span class="metric-value">{{ formatNumber(item.revenue) }}</span>
+                    <a-progress :percent="percent(item.revenue, overallMax)" :show-info="false" size="small" class="bar" />
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-label">毛利额</span>
+                    <span class="metric-value profit">{{ formatNumber(item.gross_profit) }}</span>
+                    <a-progress :percent="percent(item.gross_profit, overallMax)" :show-info="false" size="small" stroke-color="#52c41a" class="bar" />
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-label">毛利率</span>
+                    <span class="metric-value margin">{{ formatMargin(item.gross_margin) }}</span>
+                    <a-progress :percent="percent(item.gross_margin, 100)" :show-info="false" size="small" stroke-color="#faad14" class="bar" />
+                  </div>
+                </div>
               </div>
-              <div class="metric-row">
-                <span class="metric-label">毛利额</span>
-                <span class="metric-value profit">{{ formatNumber(item.gross_profit) }}</span>
-                <a-progress :percent="percent(item.gross_profit, maxItemProfit)" :show-info="false" size="small" stroke-color="#52c41a" class="bar" />
+            </a-list-item>
+          </template>
+        </a-list>
+      </a-col>
+      <a-col :span="12">
+        <a-list :data-source="rightItems" size="small">
+          <template #renderItem="{ item, index }">
+            <a-list-item>
+              <div class="rank-row">
+                <span :class="['rank-badge', (index + 5) < 3 ? `rank-${index + 1}` : '']">{{ index + 6 }}</span>
+                <span class="name">{{ item.dimension_value }}</span>
+                <div class="metrics">
+                  <div class="metric-row">
+                    <span class="metric-label">收入</span>
+                    <span class="metric-value">{{ formatNumber(item.revenue) }}</span>
+                    <a-progress :percent="percent(item.revenue, overallMax)" :show-info="false" size="small" class="bar" />
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-label">毛利额</span>
+                    <span class="metric-value profit">{{ formatNumber(item.gross_profit) }}</span>
+                    <a-progress :percent="percent(item.gross_profit, overallMax)" :show-info="false" size="small" stroke-color="#52c41a" class="bar" />
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-label">毛利率</span>
+                    <span class="metric-value margin">{{ formatMargin(item.gross_margin) }}</span>
+                    <a-progress :percent="percent(item.gross_margin, 100)" :show-info="false" size="small" stroke-color="#faad14" class="bar" />
+                  </div>
+                </div>
               </div>
-              <div class="metric-row">
-                <span class="metric-label">毛利率</span>
-                <span class="metric-value margin">{{ formatMargin(item.gross_margin) }}</span>
-                <a-progress :percent="percent(item.gross_margin, 100)" :show-info="false" size="small" stroke-color="#faad14" class="bar" />
-              </div>
-            </div>
-          </div>
-        </a-list-item>
-      </template>
-    </a-list>
-    <a-empty v-if="topItems.length === 0" />
+            </a-list-item>
+          </template>
+        </a-list>
+      </a-col>
+    </a-row>
+    <a-empty v-if="!allItems.length" />
   </a-card>
 </template>
 
@@ -42,29 +75,23 @@ const props = defineProps<{
   dimension?: string;
 }>();
 
-const DIMENSION_LABELS: Record<string, string> = {
-  customer: '客户',
-  product_line: '产品线',
-  department: '部门',
-};
-
-const panelTitle = computed(() => {
-  const label = DIMENSION_LABELS[props.dimension || ''] || '';
-  return `Top 10 ${label}集中度排名`;
+const allItems = computed<BreakdownItem[]>(() => {
+  const source = (props.dimension === 'customer' && props.customers?.length)
+    ? props.customers
+    : props.breakdowns;
+  return [...(source || [])]
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
+    .slice(0, 10);
 });
 
-const topItems = computed<BreakdownItem[]>(() => {
-  if (props.dimension === 'customer' && props.customers?.length) {
-    return [...props.customers].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 10);
-  }
-  if (props.breakdowns?.length) {
-    return [...props.breakdowns].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 10);
-  }
-  return [];
-});
+const leftItems = computed(() => allItems.value.slice(0, 5));
+const rightItems = computed(() => allItems.value.slice(5, 10));
 
-const maxItemRevenue = computed(() => Math.max(1, ...topItems.value.map((c) => c.revenue || 0)));
-const maxItemProfit = computed(() => Math.max(1, ...topItems.value.map((c) => Math.abs(c.gross_profit || 0))));
+const overallMax = computed(() => {
+  const rev = Math.max(1, ...allItems.value.map((c) => c.revenue || 0));
+  const gp = Math.max(1, ...allItems.value.map((c) => Math.abs(c.gross_profit || 0)));
+  return Math.max(rev, gp);
+});
 
 function percent(value: number | undefined, max: number): number {
   if (!value || !max) return 0;
@@ -83,7 +110,7 @@ function formatMargin(v: number | undefined): string {
 
 <style scoped lang="less">
 .concentration-panel {
-  max-width: 600px;
+  width: 100%;
 }
 
 .rank-row {

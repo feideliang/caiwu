@@ -33,7 +33,7 @@
           :key="key"
           :label="formatKey(key)"
         >
-          {{ formatValue(val) }}
+          {{ formatValue(val, key) }}
         </a-descriptions-item>
       </a-descriptions>
     </a-modal>
@@ -46,6 +46,7 @@ import type { TableColumnsType } from 'ant-design-vue';
 import { getDrillRecordsByProduct, getRecord } from '@/api/drilldowns';
 import type { DrillRecord } from '@/types/drilldown';
 import { FileOutlined } from '@ant-design/icons-vue';
+import { toWan } from '@/utils/format';
 
 const props = defineProps<{
   reportId: string;
@@ -87,12 +88,12 @@ async function onRecordClick(record: DrillRecord) {
         entity: raw.entity,
         metric_name: raw.metric_name,
         metric_value: raw.metric_value,
-        ...(raw.tags as Record<string, unknown>),
+        ...(raw.tags ?? {}) as Record<string, unknown>,
       },
     };
     detailVisible.value = true;
   } catch {
-    selectedRecord.value = record;
+    selectedRecord.value = { ...record, fields: (record as any).fields ?? {} };
     detailVisible.value = true;
   }
 }
@@ -103,7 +104,7 @@ function formatKey(key: string): string {
     period: '期间',
     entity: '所属部门',
     metric_name: '产品名称',
-    metric_value: '金额',
+    metric_value: '金额(万元)',
     transaction_no: '交易号',
     date: '日期',
     customer: '客户',
@@ -116,7 +117,8 @@ function formatKey(key: string): string {
   return labels[key] || key;
 }
 
-function formatValue(val: unknown): string {
+function formatValue(val: unknown, key?: string): string {
+  if (key === 'metric_value' && typeof val === 'number') return toWan(val).toFixed(2);
   if (typeof val === 'number') return val.toFixed(2);
   return String(val ?? '-');
 }
@@ -127,8 +129,9 @@ onMounted(async () => {
     if (props.recordId) {
       // L4 with specific record: fetch single record
       const { data } = await getRecord(props.recordId);
-      const record = data.data as DrillRecord;
-      records.value = [record];
+      const raw = data.data as DrillRecord | null;
+      if (!raw) return;
+      records.value = [raw];
     } else if (props.departmentId && props.productId) {
       const { data } = await getDrillRecordsByProduct(props.reportId, props.departmentId, props.productId);
       const wrapper = data.data as { records?: DrillRecord[] };

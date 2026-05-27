@@ -106,7 +106,7 @@ watch(
 );
 
 onMounted(() => {
-  const lvl = parseInt(String(route.query.level), 10);
+  let lvl = parseInt(String(route.query.level), 10);
 
   // Only init on first load (when store state is empty)
   if (!drilldownStore.state.report_id) {
@@ -137,6 +137,13 @@ onMounted(() => {
     if (route.query.department_id) params.department_id = route.query.department_id as string;
     if (route.query.product_id) params.product_id = route.query.product_id as string;
     if (route.query.record_id) params.record_id = parseInt(route.query.record_id as string, 10);
+
+    // Validate that required params exist for the requested level;
+    // fall back to level 1 if they don't to avoid inconsistent state.
+    if ((lvl >= 2 && !params.department_id) || (lvl >= 3 && !params.product_id)) {
+      lvl = 1;
+    }
+
     const label = (lvl === 2 ? (departmentName || productName) : lvl === 3 ? (productName || recordTitle) : recordTitle) || `L${lvl}`;
     drilldownStore.push(lvl as 1 | 2 | 3 | 4, label, params);
   }

@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ResourceNotFoundError
 from app.core.response import APIResponse
-from app.core.security import get_current_user, get_data_scope_filter, TokenPayload
+from app.core.security import get_current_user, TokenPayload
 from app.db.session import get_db
-from app.models.core import FinancialData
+from app.models.core import AggDimensionSummary, AggPeriodSummary
 from app.models.v3 import FilterView
 from app.schemas.filters import (
     FilterCondition,
@@ -53,68 +53,87 @@ async def get_filter_options(
     """Return dynamic filter options for a given dimension.
 
     Supported dimensions: period, entity, metric_name, department, product, product_line, customer.
-    Queries the financial_data table for distinct values.
+    Entity options read from AggDimensionSummary; metric_name is a static list.
     """
     col_map = {
-        "period": FinancialData.period,
-        "entity": FinancialData.entity,
-        "metric_name": FinancialData.metric_name,
+        "period": None,  # handled separately via AggPeriodSummary
+        "entity": None,  # handled via AggDimensionSummary
+        "metric_name": None,  # static list
     }
 
     if dimension:
+        # Period: read from aggregation table
+        if dimension == "period":
+            bgbu = (user.department if (user.role != "admin" and user.department) else "ALL")
+            stmt = (
+                select(AggPeriodSummary.period)
+                .where(AggPeriodSummary.bgbu == bgbu)
+                .distinct()
+                .order_by(AggPeriodSummary.period.desc())
+            )
+            if prefix:
+                stmt = stmt.where(AggPeriodSummary.period.like(f"{prefix}%"))
+            result = await db.execute(stmt)
+            options = [r[0] for r in result.all() if r[0]]
+            return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})
+
         # Direct column dimensions
         if dimension in col_map:
-            col = col_map[dimension]
-            stmt = select(col).distinct().order_by(col)
-            scope_filter = get_data_scope_filter(user, FinancialData)
-            if scope_filter is not True:
-                stmt = stmt.where(scope_filter)
-            if prefix:
-                stmt = stmt.where(col.like(f"{prefix}%"))
-            result = await db.execute(stmt)
-            options = [str(r[0]) for r in result.all() if r[0] is not None]
-            return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})
+            # entity: return all distinct dim_value from agg_dimension_summary (no dim_type filter)
+            # Note: this returns mixed values (products, customers, contract types)
+            if dimension == "entity":
+                bgbu = (user.department if (user.role != "admin" and user.department) else "ALL")
+                stmt = (
+                    select(AggDimensionSummary.dim_value)
+                    .where(AggDimensionSummary.bgbu == bgbu)
+                    .distinct()
+                    .order_by(AggDimensionSummary.dim_value)
+                )
+                if prefix:
+                    stmt = stmt.where(AggDimensionSummary.dim_value.like(f"{prefix}%"))
+                result = await db.execute(stmt)
+                options = [str(r[0]) for r in result.all() if r[0] is not None]
+                return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})
+
+            # metric_name: static list, no DB query needed
+            if dimension == "metric_name":
+                all_metrics = ["revenue", "cost", "gross_profit"]
+                options = [m for m in all_metrics if not prefix or m.startswith(prefix)]
+                return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})
 
         # Tag-based dimensions: department, product, product_line, customer
         if dimension in ("department", "product", "product_line", "customer"):
-            tag_key_map = {
-                "department": ["department"],
-                "product_line": ["product_line"],
-                "product": ["product", "series"],
-                "customer": ["customer"],
+            # Map to agg table dim_type
+            dim_type_map = {
+                "department": None,  # from period_summary bgbu
+                "product_line": "product_line",
+                "product": "product_line",
+                "customer": "customer",
             }
-            keys = tag_key_map.get(dimension, [])
-            values = set()
+            bgbu = (user.department if (user.role != "admin" and user.department) else "ALL")
 
-            # Use raw SQL tags->>'key' for distinct extraction (SQLAlchemy JSON column quirks)
-            from sqlalchemy import text
-            for key in keys:
-                if user.role != "admin" and user.department:
-                    sql = text(
-                        f"SELECT DISTINCT tags->>'{key}' FROM financial_data "
-                        f"WHERE tags IS NOT NULL AND tags->>'{key}' IS NOT NULL "
-                        f"AND entity = :dept"
-                    )
-                    result = await db.execute(sql, {"dept": user.department})
-                else:
-                    sql = text(
-                        f"SELECT DISTINCT tags->>'{key}' FROM financial_data "
-                        f"WHERE tags IS NOT NULL AND tags->>'{key}' IS NOT NULL"
-                    )
-                    result = await db.execute(sql)
-                for row in result:
-                    val = row[0]
-                    if val:
-                        values.add(str(val))
-
-            # For department, use tags->>'department' only (entity column contains garbled product names)
-            # _extract_dimension falls back to entity, but filter options should be clean
             if dimension == "department":
-                pass  # already collected from tags above
-
-            options = sorted(values)
+                # Read bgbu values from period_summary
+                stmt = (
+                    select(AggPeriodSummary.bgbu)
+                    .where(AggPeriodSummary.bgbu != "ALL")
+                    .distinct()
+                    .order_by(AggPeriodSummary.bgbu)
+                )
+            else:
+                agg_type = dim_type_map[dimension]
+                stmt = (
+                    select(AggDimensionSummary.dim_value)
+                    .where(AggDimensionSummary.bgbu == bgbu)
+                    .where(AggDimensionSummary.dim_type == agg_type)
+                    .distinct()
+                    .order_by(AggDimensionSummary.dim_value)
+                )
             if prefix:
-                options = [o for o in options if o.startswith(prefix)]
+                col = stmt.selected_columns[0]
+                stmt = stmt.where(col.like(f"{prefix}%"))
+            result = await db.execute(stmt)
+            options = [str(r[0]) for r in result.all() if r[0] is not None]
             return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})
 
         # Unknown dimension

@@ -48,7 +48,7 @@ async def main():
         )
 
         print("Generating rule-based insights...")
-        rule_items = InsightRuleService.generate_insights(
+        rule_items = await InsightRuleService.generate_insights(
             metrics,
             customer_breakdowns=customer_metrics.breakdowns,
             product_breakdowns=product_metrics.breakdowns,

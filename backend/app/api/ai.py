@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.response import APIResponse
 from app.core.security import decode_access_token, TokenPayload, get_current_user
 from app.db.session import get_db
-from app.models.core import FinancialData
+from app.models.core import AggDimensionSummary, AggPeriodSummary
 from app.schemas.ai import (
     ChartRecommendRequest,
     ChartRecommendResponse,
@@ -108,24 +108,33 @@ async def ai_analyze(
     Compares current period vs previous period and returns analysis text,
     attribution factors, and recommendations based on FinancialData.
     """
-    # Get current period data
-    curr_stmt = select(
-        FinancialData.metric_name,
-        FinancialData.entity,
-        func.sum(FinancialData.metric_value).label("value"),
-    ).where(
-        FinancialData.period == period,
-        FinancialData.metric_name == metric,
-        FinancialData.entity.isnot(None),
-        FinancialData.entity != "",
-    ).group_by(FinancialData.metric_name, FinancialData.entity)
+    # Map metric_name to aggregated table column; fallback for unknown metrics.
+    metric_col_map = {"revenue": AggDimensionSummary.revenue, "cost": AggDimensionSummary.cost, "gross_profit": AggDimensionSummary.gross_profit}
+    metric_col = metric_col_map.get(metric)
 
-    # Apply department scope
+    # Determine bgbu filter for department scoping (same pattern as drilldowns.py)
     if _user and _user.role != "admin" and _user.department:
-        curr_stmt = curr_stmt.where(FinancialData.entity == _user.department)
+        bgbu_filter = _user.department
+    else:
+        bgbu_filter = "ALL"
 
-    curr_result = await db.execute(curr_stmt)
-    curr_rows = curr_result.all()
+    if metric_col is not None:
+        # Use aggregated dimension summary table (dim_type='customer' for customer-level aggregation)
+        curr_stmt = select(
+            AggDimensionSummary.dim_value.label("entity"),
+            metric_col.label("value"),
+        ).where(
+            AggDimensionSummary.period == period,
+            AggDimensionSummary.dim_type == "customer",
+            AggDimensionSummary.bgbu == bgbu_filter,
+            AggDimensionSummary.dim_value.isnot(None),
+            AggDimensionSummary.dim_value != "",
+        )
+        curr_result = await db.execute(curr_stmt)
+        curr_rows = curr_result.all()
+    else:
+        # Unknown metric: no data source available (financial_data table is empty)
+        curr_rows = []
 
     # Compute previous period (try monthly - 1 month, or quarterly - 1 quarter)
     prev_period = period
@@ -144,23 +153,23 @@ async def ai_analyze(
             year -= 1
         prev_period = f"{year}-Q{q}"
 
-    prev_stmt = select(
-        FinancialData.metric_name,
-        FinancialData.entity,
-        func.sum(FinancialData.metric_value).label("value"),
-    ).where(
-        FinancialData.period == prev_period,
-        FinancialData.metric_name == metric,
-        FinancialData.entity.isnot(None),
-        FinancialData.entity != "",
-    ).group_by(FinancialData.metric_name, FinancialData.entity)
-
-    # Apply department scope
-    if _user and _user.role != "admin" and _user.department:
-        prev_stmt = prev_stmt.where(FinancialData.entity == _user.department)
-
-    prev_result = await db.execute(prev_stmt)
-    prev_rows = prev_result.all()
+    if metric_col is not None:
+        # Use aggregated dimension summary table for previous period
+        prev_stmt = select(
+            AggDimensionSummary.dim_value.label("entity"),
+            metric_col.label("value"),
+        ).where(
+            AggDimensionSummary.period == prev_period,
+            AggDimensionSummary.dim_type == "customer",
+            AggDimensionSummary.bgbu == bgbu_filter,
+            AggDimensionSummary.dim_value.isnot(None),
+            AggDimensionSummary.dim_value != "",
+        )
+        prev_result = await db.execute(prev_stmt)
+        prev_rows = prev_result.all()
+    else:
+        # Unknown metric: no data source available (financial_data table is empty)
+        prev_rows = []
 
     # Build maps
     curr_map = {r.entity: r.value for r in curr_rows}
@@ -366,6 +375,12 @@ _KNOWLEDGE_BASE_RULES = (
 
 async def _get_rules_for_question(question: str) -> str:
     """RAG retrieval: fetch relevant rules from Qdrant. Fallback to hardcoded."""
+    # Skip RAG for very short or non-financial questions
+    if len(question.strip()) < 3:
+        return ""
+    if not _is_financial_question(question):
+        return ""
+
     try:
         from app.services.rule_retrieval import retrieve_rules
         rules_text = await retrieve_rules(question)
@@ -612,8 +627,16 @@ async def ai_chat(
     Returns an answer with references to dashboard metrics.
     Falls back to rule-based analysis if no AI model is configured.
     """
+    # Handle __init__ or empty/whitespace request FIRST — no DB queries needed
+    if not body.question or not body.question.strip() or body.question.strip() == "__init__":
+        return APIResponse.success(data={
+            "answer": "",
+            "suggestions": ["本月收入与毛利概况", "收入同比分析", "部门收入拆解"],
+            "references": [],
+        })
+
     # Fetch dashboard data for context (use context filters)
-    from app.api.dashboard import _build_kpis, _build_dimension_breakdowns
+    from app.api.dashboard import _build_kpis
 
     ctx = body.context
     t0 = time.time()
@@ -627,21 +650,9 @@ async def ai_chat(
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )
-    dept_items, prod_items = await _build_dimension_breakdowns(
-        db,
-        period_compare_type=ctx.period_compare_type if ctx else None,
-        period_dimension=ctx.period_dimension if ctx else None,
-        period=ctx.period if ctx else None,
-        period_start=ctx.period_start if ctx else None,
-        period_end=ctx.period_end if ctx else None,
-        department=ctx.department if ctx else None,
-        product=ctx.product if ctx else None,
-    )
+    # Skip expensive breakdown query — prompt only needs summary KPIs + RAG rules
+    dept_items, prod_items = [], []
     db_elapsed = time.time() - t0
-    logger.info(f"AI chat DB queries took {db_elapsed:.2f}s")
-    if db_elapsed > 10:
-        dept_items, prod_items = [], []
-        logger.warning("DB query too slow (>10s), skipping dimension breakdowns")
 
     t1 = time.time()
     bi_context = _build_bi_context(kpis, dept_items, prod_items)
@@ -650,17 +661,7 @@ async def ai_chat(
     # ── Qwen timing ─────────────────────────────────────────────
     t_qwen_start = time.time()
 
-    # Handle __init__ or empty/whitespace request: return suggestions only, no answer
-    if not body.question or not body.question.strip() or body.question.strip() == "__init__":
-        active_section = body.context.active_section if body.context else ""
-        suggestions = _get_page_suggestions(kpis, dept_items, prod_items, active_section)
-        return APIResponse.success(data={
-            "answer": "",
-            "suggestions": suggestions,
-            "references": [],
-        })
-
-    # Add context note to question
+    t1 = time.time()
     context_note = ""
     if body.context:
         parts = []
@@ -743,7 +744,7 @@ async def ai_chat(
                 f"2. 中文回答，简洁专业\n"
                 f"3. 数据不足时明确说明\n"
                 f"4. 使用中文数字标题分段（一、二、三…）\n"
-                f"5. 每个标题下按行列出指标，格式尽量使用“指标名：数值（对比信息）”\n"
+                f"5. 每个标题下按行列出指标，每行不超过15字，格式：指标名：数值\n"
                 f"6. 异常、原因、建议分别成段，不要把所有内容挤成一段\n"
             )
 
@@ -773,6 +774,19 @@ async def ai_chat(
     })
 
 
+def _is_financial_question(question: str) -> bool:
+    """Check if the question is finance-related."""
+    q = question.lower()
+    return any(kw in q for kw in [
+        "收入", "毛利", "成本", "利润", "毛利率", "部门", "产品", "客户",
+        "订单", "经营", "指标", "增长", "环比", "同比", "累计",
+        "营收", "达成", "集中度", "风险", "异常", "分析", "贡献",
+        "总结", "概况", "走势", "趋势", "预测", "dso", "ito",
+        "revenue", "profit", "margin", "department", "product",
+        "经营情况", "下钻", "拆解", "影响", "结构"
+    ])
+
+
 def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_items: list) -> str:
     """Build a concise prompt for AI chat."""
     ctx = body.context
@@ -791,14 +805,7 @@ def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_ite
         if parts:
             context_note = f"\n\n当前筛选条件：{'，'.join(parts)}"
 
-    is_financial_question = any(kw in body.question.lower() for kw in [
-        "收入", "毛利", "成本", "利润", "毛利率", "部门", "产品", "客户",
-        "订单", "经营", "指标", "增长", "环比", "同比", "累计",
-        "营收", "达成", "集中度", "风险", "异常", "分析", "贡献",
-        "总结", "概况", "走势", "趋势", "预测", "dso", "ito",
-        "revenue", "profit", "margin", "department", "product",
-        "经营情况", "下钻", "拆解", "影响", "结构"
-    ])
+    is_financial_question = _is_financial_question(body.question)
 
     if is_financial_question:
         # Build concise data section with all available data
@@ -849,7 +856,7 @@ def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_ite
         f"2. 中文回答，简洁专业\n"
         f"3. 数据不足时明确说明\n"
         f"4. 使用中文数字标题分段（一、二、三…）\n"
-        f"5. 每个标题下按行列出指标，格式尽量使用“指标名：数值（对比信息）”\n"
+        f"5. 每个标题下按行列出指标，每行不超过15字，格式：指标名：数值\n"
         f"6. 异常、原因、建议分别成段，不要把所有内容挤成一段\n"
     )
     return prompt
@@ -866,7 +873,7 @@ async def _stream_qwen_sse(prompt: str, model: str | None = None):
     body_json = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1500,
+        "max_tokens": 600,
         "stream": True,
     }
     # Disable thinking for models that support it
@@ -892,9 +899,18 @@ async def _stream_qwen_sse(prompt: str, model: str | None = None):
                 if data == "[DONE]":
                     yield f"data: {{\"done\": true}}\n\n"
                     break
-                # Forward the raw chunk (already a data: line from the API)
-                # But we need to re-wrap it for our own SSE
-                yield f"data: {data}\n\n"
+                # Some models (deepseek) send reasoning_content before content.
+                # Forward reasoning as content so the frontend displays it immediately.
+                try:
+                    chunk = json.loads(data)
+                    if chunk.get("choices") and chunk["choices"][0].get("delta"):
+                        delta = chunk["choices"][0]["delta"]
+                        if delta.get("content") is None and delta.get("reasoning_content"):
+                            delta["content"] = delta.pop("reasoning_content")
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                except json.JSONDecodeError:
+                    # Forward raw if not parseable
+                    yield f"data: {data}\n\n"
 
 
 @router.post("/chat/stream")
@@ -904,47 +920,40 @@ async def ai_chat_stream(
     _user = Depends(get_optional_user),
 ):
     """Stream AI chat response via SSE."""
-    from app.api.dashboard import _build_kpis, _build_dimension_breakdowns
-
-    ctx = body.context
-    kpis = await _build_kpis(
-        db,
-        period_compare_type=ctx.period_compare_type if ctx else None,
-        period_dimension=ctx.period_dimension if ctx else None,
-        period=ctx.period if ctx else None,
-        period_start=ctx.period_start if ctx else None,
-        period_end=ctx.period_end if ctx else None,
-        department=ctx.department if ctx else None,
-        product=ctx.product if ctx else None,
-    )
-    dept_items, prod_items = await _build_dimension_breakdowns(
-        db,
-        period_compare_type=ctx.period_compare_type if ctx else None,
-        period_dimension=ctx.period_dimension if ctx else None,
-        period=ctx.period if ctx else None,
-        period_start=ctx.period_start if ctx else None,
-        period_end=ctx.period_end if ctx else None,
-        department=ctx.department if ctx else None,
-        product=ctx.product if ctx else None,
-    )
-
-    # Handle empty/init requests
+    # Handle empty/init requests FIRST — no DB queries needed
     if not body.question or not body.question.strip() or body.question.strip() == "__init__":
-        active_section = body.context.active_section if body.context else ""
-        suggestions = _get_page_suggestions(kpis, dept_items, prod_items, active_section)
-        suggestions_json = json.dumps(suggestions)
-
+        suggestions_json = json.dumps(["本月收入与毛利概况", "收入同比分析", "部门收入拆解"])
         async def gen_init():
             yield f"data: {{\"suggestions\": {suggestions_json}, \"done\": true}}\n\n"
-
         return StreamingResponse(gen_init(), media_type="text/event-stream")
+
+    from app.api.dashboard import _build_kpis
+    ctx = body.context
+
+    # Skip _build_kpis for non-financial questions — saves ~2s DB query
+    if _is_financial_question(body.question):
+        kpis = await _build_kpis(
+            db,
+            period_compare_type=ctx.period_compare_type if ctx else None,
+            period_dimension=ctx.period_dimension if ctx else None,
+            period=ctx.period if ctx else None,
+            period_start=ctx.period_start if ctx else None,
+            period_end=ctx.period_end if ctx else None,
+            department=ctx.department if ctx else None,
+            product=ctx.product if ctx else None,
+        )
+    else:
+        kpis = {}
+    # Skip expensive breakdown query — prompt only needs summary KPIs + RAG rules
+    dept_items, prod_items = [], []
 
     # Build prompt with RAG rules
     prompt = _build_chat_prompt(body, kpis, dept_items, prod_items)
 
     # Prepend rules via RAG
     rules_text = await _get_rules_for_question(body.question)
-    prompt = f"{prompt}\n\n{rules_text}"
+    if rules_text:
+        prompt = f"{prompt}\n\n{rules_text}"
 
     # Use model from request if provided, otherwise default from settings
     model = getattr(body, 'model', None) or settings.qwen_model

@@ -8,11 +8,11 @@
         <a-descriptions-item label="变量 Y">{{ pair.variable_y }}</a-descriptions-item>
         <a-descriptions-item label="相关系数">
           <a-tag :color="correlationColor(pair.correlation_coefficient)">
-            {{ pair.correlation_coefficient.toFixed(3) }}
+            {{ (pair.correlation_coefficient ?? 0).toFixed(3) }}
           </a-tag>
         </a-descriptions-item>
         <a-descriptions-item label="P 值">
-          {{ pair.p_value < 0.001 ? '< 0.001' : pair.p_value.toFixed(4) }}
+          {{ pair.p_value != null ? (pair.p_value < 0.001 ? '< 0.001' : pair.p_value.toFixed(4)) : '-' }}
         </a-descriptions-item>
         <a-descriptions-item label="样本量">{{ (pair as any).sample_size ?? '-' }}</a-descriptions-item>
         <a-descriptions-item label="当前状态">

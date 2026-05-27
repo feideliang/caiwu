@@ -37,6 +37,11 @@
             </a-select>
             <!-- Customer selector -->
             <a-select v-model:value="selectedCustomer" :options="customerOptions" style="width: 180px" placeholder="客户" allow-clear />
+            <!-- Secondary dimension selector -->
+            <a-select v-if="selectedCustomer" v-model:value="secondaryDimension" style="width: 130px" placeholder="对比维度">
+              <a-select-option value="customer">客户</a-select-option>
+              <a-select-option value="contract_type">合同类型</a-select-option>
+            </a-select>
             <a-button type="primary" @click="refresh">刷新</a-button>
           </a-space>
         </template>
@@ -49,16 +54,16 @@
       <!-- KPI Cards (4) -->
       <a-row :gutter="[16, 16]" class="kpi-row">
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="收入" :value="toWan(summary?.revenue)" unit="万元" :precision="2" :trend="summary?.revenue_yoy_growth" />
+          <KpiCard title="收入" :value="toWan(summary?.revenue)" unit="万元" :precision="0" :trend="revTrend" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="毛利额" :value="toWan(summary?.gross_profit)" unit="万元" :precision="2" :trend="summary?.gross_profit_yoy_growth" />
+          <KpiCard title="毛利额" :value="toWan(summary?.gross_profit)" unit="万元" :precision="0" :trend="gpTrend" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="毛利率" :value="summary?.gross_margin || 0" unit="%" :precision="2" />
+          <KpiCard title="毛利率" :value="summary?.gross_margin || 0" unit="%" :precision="2" :trend="gmTrend" trendSuffix="pp" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="客户集中度Top3" :value="summary?.customer_concentration_top3 || 0" unit="%" :precision="2" />
+          <KpiCard title="客户集中度Top10" :value="summary?.customer_concentration_top10 || 0" unit="%" :precision="2" :trend="top10Trend" trendSuffix="pp" />
         </a-col>
       </a-row>
 
@@ -74,17 +79,17 @@
       <!-- Charts -->
       <a-row :gutter="[16, 16]">
         <a-col :xs="24" :md="12">
-          <ChartWidget :title="drillMode ? '销售产品收入排行' : '客户收入Top10'" :data="customerRevenueRanking" chart-type="bar" :loading="loading" @chart-click="onChartClick" />
+          <ChartWidget :title="drillMode ? '销售产品收入排行' : (secondaryDimLabel + '收入Top10')" :data="customerRevenueRanking" chart-type="bar" :loading="loading" @chart-click="onChartClick" />
         </a-col>
         <a-col :xs="24" :md="12">
-          <ChartWidget title="客户收入毛利对比" :data="customerRevenueMarginCompare" chart-type="grouped-bar" :loading="loading" @chart-click="onChartClick" />
+          <ChartWidget :title="drillMode ? '销售产品收入毛利对比' : (secondaryDimLabel + '收入毛利对比')" :data="customerRevenueMarginCompare" chart-type="grouped-bar" :loading="loading" @chart-click="onChartClick" />
         </a-col>
       </a-row>
 
       <!-- Charts Row 2: Margin pie -->
       <a-row :gutter="[16, 16]">
         <a-col :xs="24" :md="12">
-          <ChartWidget title="客户毛利率分布" :data="customerMarginPie" chart-type="pie" :loading="loading" @chart-click="onChartClick" />
+          <ChartWidget :title="drillMode ? '销售产品毛利率分布' : (secondaryDimLabel + '毛利率分布')" :data="customerMarginPie" chart-type="pie" :loading="loading" @chart-click="onChartClick" />
         </a-col>
       </a-row>
 
@@ -125,6 +130,26 @@
     <div v-if="showAssistant" class="analysis-assistant">
       <FinancialAssistantPanel :context="assistantContext" />
     </div>
+
+    <!-- Calculation Rules -->
+    <a-collapse :bordered="false" class="calc-rules-section" style="margin-top: 16px">
+      <a-collapse-panel header="计算规则说明" key="rules">
+        <a-descriptions :column="1" size="small" bordered>
+          <a-descriptions-item label="同比 (YoY)">
+            (当期值 - 去年同期值) / 去年同期值 x 100%
+          </a-descriptions-item>
+          <a-descriptions-item label="环比 (MoM)">
+            (当期值 - 上期值) / 上期值 x 100%
+          </a-descriptions-item>
+          <a-descriptions-item label="毛利率">
+            毛利额 / 营业收入 x 100%
+          </a-descriptions-item>
+          <a-descriptions-item label="筛选影响">
+            选择客户后，同比/环比的分母（基期数据）也按相同客户过滤，确保对比口径一致。增长率超过100%属于正常现象。
+          </a-descriptions-item>
+        </a-descriptions>
+      </a-collapse-panel>
+    </a-collapse>
   </div>
 </template>
 
@@ -151,6 +176,7 @@ const periodDimension = ref<string>('cumulative');
 const selectedPeriod = ref<string | undefined>();
 const compareBase = ref<string>('yoy');
 const selectedCustomer = ref<string | undefined>();
+const secondaryDimension = ref<string>('customer');
 const customRange = ref<[any, any] | null>(null);
 const periodStart = ref<string | undefined>();
 const periodEnd = ref<string | undefined>();
@@ -166,10 +192,15 @@ const drillCustomer = ref<string | undefined>();
 // Current dimension: customer or sales_product (drill-down)
 const currentDimension = computed(() => drillMode.value ? 'sales_product' : 'customer');
 
-// When in non-drill mode, use customer_breakdown; in drill mode, use breakdowns
+// When in non-drill mode, use customer_breakdown or contract_type_breakdown based on secondaryDimension
+const secondaryDimLabel = computed(() => secondaryDimension.value === 'contract_type' ? '合同类型' : '客户');
+
 const displayBreakdowns = computed<BreakdownItem[]>(() => {
   if (drillMode.value) {
     return metricsData.value?.breakdowns || [];
+  }
+  if (secondaryDimension.value === 'contract_type') {
+    return metricsData.value?.contract_type_breakdown || [];
   }
   return metricsData.value?.customer_breakdown || [];
 });
@@ -200,9 +231,16 @@ watch(periodDimension, () => {
 
 const summary = computed(() => metricsData.value?.summary);
 
+// Dynamic trend fields based on compare mode
+const isMom = computed(() => compareBase.value === 'mom');
+const revTrend = computed(() => isMom.value ? summary.value?.revenue_mom_growth : summary.value?.revenue_yoy_growth);
+const gpTrend = computed(() => isMom.value ? summary.value?.gross_profit_mom_growth : summary.value?.gross_profit_yoy_growth);
+const gmTrend = computed(() => isMom.value ? summary.value?.gross_margin_mom_change : summary.value?.gross_margin_yoy_change);
+const top10Trend = computed(() => summary.value?.customer_concentration_top3_change);
+
 // Table columns
 const tableColumns = computed(() => [
-  { title: drillMode.value ? '销售产品' : '客户', dataIndex: 'dimension_value', key: 'dimension_value', width: 160, fixed: 'left' },
+  { title: drillMode.value ? '销售产品' : secondaryDimLabel.value, dataIndex: 'dimension_value', key: 'dimension_value', width: 160, fixed: 'left' },
   { title: '收入(万元)', key: 'revenue', width: 120 },
   { title: '收入贡献度', key: 'revenue_contribution', width: 120 },
   { title: '毛利(万元)', key: 'gross_profit', width: 120 },
@@ -239,24 +277,30 @@ const customerRevenueRanking = computed(() =>
     .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
     .slice(0, 10)
     .map((b) => ({
-      [drillMode.value ? '销售产品' : '客户']: b.dimension_value,
-      收入: b.revenue || 0,
+      [drillMode.value ? '销售产品' : secondaryDimLabel.value]: b.dimension_value,
+      '收入(万元)': toWan(b.revenue),
     }))
 );
 
 // Chart 2: Customer revenue + gross profit grouped bar
 const customerRevenueMarginCompare = computed(() =>
-  displayBreakdowns.value.map((b) => ({
-    客户: b.dimension_value,
-    营业收入: b.revenue || 0,
-    毛利额: b.gross_profit || 0,
+  [...displayBreakdowns.value]
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
+    .slice(0, 10)
+    .map((b) => ({
+    [drillMode.value ? '销售产品' : secondaryDimLabel.value]: b.dimension_value,
+    '营业收入(万元)': Math.round((toWan(b.revenue) || 0) * 100) / 100,
+    '毛利额(万元)': Math.round((toWan(b.gross_profit) || 0) * 100) / 100,
   }))
 );
 
 // Chart 3: Customer margin rate pie
 const customerMarginPie = computed(() =>
-  displayBreakdowns.value.map((b) => ({
-    客户: b.dimension_value,
+  [...displayBreakdowns.value]
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
+    .slice(0, 10)
+    .map((b) => ({
+    [drillMode.value ? '销售产品' : secondaryDimLabel.value]: b.dimension_value,
     毛利率: b.gross_margin || 0,
   }))
 );
@@ -274,15 +318,20 @@ const assistantContext = computed(() => ({
 async function fetchMetrics() {
   loading.value = true;
   try {
-    const { data: resp } = await getCoreMetrics({
+    const params: Record<string, unknown> = {
       period: period.value,
       dimension: currentDimension.value,
-      entity: drillMode.value ? undefined : selectedCustomer.value,
-      customer: drillMode.value ? drillCustomer.value : undefined,
       period_dimension: periodDimension.value,
       period_start: periodStart.value,
       period_end: periodEnd.value,
-    });
+    };
+    if (drillMode.value && drillCustomer.value) {
+      params.customer = drillCustomer.value;
+      params.dimension = 'sales_product';
+    } else if (selectedCustomer.value) {
+      params.entity = selectedCustomer.value;
+    }
+    const { data: resp } = await getCoreMetrics(params);
     metricsData.value = resp.data as CoreMetricsResponse;
   } finally {
     loading.value = false;

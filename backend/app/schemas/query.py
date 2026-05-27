@@ -56,7 +56,13 @@ class BreakdownItem(BaseModel):
     tax_excluded_cost: float | None = None
     gross_profit: float | None = None
     gross_margin: float | None = None
+    revenue_contribution: float | None = None
     gross_margin_contribution: float | None = None
+    order_count: int | None = None
+    avg_order_value: float | None = None
+    neg_margin_order_count: int | None = None
+    neg_margin_amount: float | None = None
+    revenue_yoy_growth: float | None = None
     revenue_mom_growth: float | None = None
     gross_profit_mom_growth: float | None = None
     calculable: bool = True
@@ -76,18 +82,23 @@ class KpiData(BaseModel):
     gross_margin: float = 0
     achievement_rate: float = 0
     # MoM (month-over-month) - already existed
-    revenue_mom_growth: float = 0
-    profit_mom_growth: float = 0
+    revenue_mom_growth: float | None = 0
+    profit_mom_growth: float | None = 0
     # YoY (year-over-year)
-    cost_yoy_growth: float = 0
-    revenue_yoy_growth: float = 0
-    profit_yoy_growth: float = 0
-    gross_margin_yoy_change: float = 0
+    cost_yoy_growth: float | None = 0
+    revenue_yoy_growth: float | None = 0
+    profit_yoy_growth: float | None = 0
+    gross_margin_yoy_change: float | None = 0
     # Cumulative YTD
     revenue_cumulative: float = 0
     profit_cumulative: float = 0
-    revenue_cumulative_growth: float = 0
-    profit_cumulative_growth: float = 0
+    revenue_cumulative_growth: float | None = 0
+    profit_cumulative_growth: float | None = 0
+    # Base period values (for YoY comparison)
+    base_revenue: float = 0
+    base_gross_profit: float = 0
+    base_gross_margin: float = 0
+    base_achievement_rate: float = 0
     # Trend series
     trend_series: list = Field(default_factory=list)
 

@@ -37,6 +37,7 @@ import {
   getContracts, getOrders, getProjects, getAnomalies, getLargeAmounts,
   type ContractItem, type OrderItem, type ProjectItem, type AnomalyItem, type LargeAmountItem,
 } from '@/api/transactions';
+import { formatWan } from '@/utils/format';
 
 const route = useRoute();
 const activeTab = ref<string>('orders');
@@ -50,38 +51,38 @@ const anomalies = ref<AnomalyItem[]>([]);
 const largeAmounts = ref<LargeAmountItem[]>([]);
 
 const orderColumns = [
-  { title: '期间', dataIndex: 'period' },
-  { title: '收入', dataIndex: 'revenue' },
-  { title: '成本', dataIndex: 'cost' },
-  { title: '利润', dataIndex: 'profit' },
+  { title: '期间', dataIndex: 'period', key: 'period' },
+  { title: '收入(万元)', dataIndex: 'revenue', key: 'revenue', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '成本(万元)', dataIndex: 'cost', key: 'cost', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '利润(万元)', dataIndex: 'profit', key: 'profit', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
 ];
 const contractColumns = [
-  { title: '实体', dataIndex: 'entity' },
-  { title: '应收', dataIndex: 'total_ar' },
-  { title: '应付', dataIndex: 'total_ap' },
-  { title: '净敞口', dataIndex: 'net_exposure' },
-  { title: '期间', dataIndex: 'period' },
+  { title: '实体', dataIndex: 'entity', key: 'entity' },
+  { title: '应收(万元)', dataIndex: 'total_ar', key: 'total_ar', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '应付(万元)', dataIndex: 'total_ap', key: 'total_ap', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '净敞口(万元)', dataIndex: 'net_exposure', key: 'net_exposure', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '期间', dataIndex: 'period', key: 'period' },
 ];
 const projectColumns = [
-  { title: '实体', dataIndex: 'entity' },
-  { title: '总收入', dataIndex: 'total_revenue' },
-  { title: '总成本', dataIndex: 'total_cost' },
-  { title: '利润率', dataIndex: 'profit_margin' },
-  { title: '期间', dataIndex: 'period_span' },
+  { title: '实体', dataIndex: 'entity', key: 'entity' },
+  { title: '总收入(万元)', dataIndex: 'total_revenue', key: 'total_revenue', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '总成本(万元)', dataIndex: 'total_cost', key: 'total_cost', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '利润率', dataIndex: 'profit_margin', key: 'profit_margin', customRender: ({ text }: { text?: number }) => text != null ? `${(text * 100).toFixed(1)}%` : '-' },
+  { title: '期间', dataIndex: 'period_span', key: 'period_span' },
 ];
 const anomalyColumns = [
-  { title: '指标', dataIndex: 'metric_name' },
-  { title: '期间', dataIndex: 'period' },
-  { title: '值', dataIndex: 'value' },
-  { title: '期望均值', dataIndex: 'expected_mean' },
-  { title: 'σ距离', dataIndex: 'sigma_distance' },
-  { title: '实体', dataIndex: 'entity' },
+  { title: '指标', dataIndex: 'metric_name', key: 'metric_name' },
+  { title: '期间', dataIndex: 'period', key: 'period' },
+  { title: '值(万元)', dataIndex: 'value', key: 'value', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '期望均值(万元)', dataIndex: 'expected_mean', key: 'expected_mean', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: 'σ距离', dataIndex: 'sigma_distance', key: 'sigma_distance' },
+  { title: '实体', dataIndex: 'entity', key: 'entity' },
 ];
 const largeColumns = [
-  { title: '指标', dataIndex: 'metric_name' },
-  { title: '值', dataIndex: 'metric_value' },
-  { title: '期间', dataIndex: 'period' },
-  { title: '实体', dataIndex: 'entity' },
+  { title: '指标', dataIndex: 'metric_name', key: 'metric_name' },
+  { title: '值(万元)', dataIndex: 'metric_value', key: 'metric_value', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '期间', dataIndex: 'period', key: 'period' },
+  { title: '实体', dataIndex: 'entity', key: 'entity' },
 ];
 
 async function reload() {

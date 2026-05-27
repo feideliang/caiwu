@@ -7,8 +7,8 @@
             <!-- Period dimension selector -->
             <a-select v-model:value="periodDimension" style="width: 120px" placeholder="周期维度">
               <a-select-option value="monthly">月度</a-select-option>
-              <a-select-option value="weekly">季度</a-select-option>
-              <a-select-option value="yearly">年累计</a-select-option>
+              <a-select-option value="quarterly">季度</a-select-option>
+              <a-select-option value="cumulative">年累计</a-select-option>
               <a-select-option value="custom">自定义期间</a-select-option>
             </a-select>
             <!-- Period selector -->
@@ -37,6 +37,11 @@
             </a-select>
             <!-- Product line selector -->
             <a-select v-model:value="selectedProduct" :options="productOptions" style="width: 180px" placeholder="产品线" allow-clear />
+            <!-- Secondary dimension selector -->
+            <a-select v-if="selectedProduct" v-model:value="secondaryDimension" style="width: 130px" placeholder="对比维度">
+              <a-select-option value="customer">客户</a-select-option>
+              <a-select-option value="contract_type">合同类型</a-select-option>
+            </a-select>
             <a-button type="primary" @click="refresh">刷新</a-button>
           </a-space>
         </template>
@@ -44,21 +49,22 @@
     </div>
     <div class="analysis-content">
       <!-- Insight Cards -->
-      <InlineInsights :breakdowns="breakdowns" :summary="summary" dimension="product_line" :max-count="5" class="section" />
+      <InlineInsights :breakdowns="displayBreakdowns" :summary="summary" dimension="product_line" :max-count="5" class="section" />
 
       <!-- KPI Cards (4) -->
       <a-row :gutter="[16, 16]" class="kpi-row">
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="收入" :value="toWan(summary?.revenue)" unit="万元" :precision="2" :trend="summary?.revenue_yoy_growth" />
+          <KpiCard title="营业收入" :value="toWan(summary?.revenue)" unit="万元" :precision="0" :trend="revTrend" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="毛利额" :value="toWan(summary?.gross_profit)" unit="万元" :precision="2" :trend="summary?.gross_profit_yoy_growth" />
+          <KpiCard title="毛利额" :value="toWan(summary?.gross_profit)" unit="万元" :precision="0" :trend="gpTrend" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="毛利率" :value="summary?.gross_margin || 0" unit="%" :precision="2" />
+          <KpiCard title="毛利率" :value="summary?.gross_margin || 0" unit="%" :precision="2"
+            :trend="gmTrend" trendSuffix="pp" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="亏损产品占比" :value="lossRatio" unit="%" :precision="2" />
+          <KpiCard title="负毛利产品占比" :value="summary?.negative_margin_product_ratio || 0" unit="%" :precision="2" :trend="negMarginTrend" trendSuffix="pp" />
         </a-col>
       </a-row>
 
@@ -95,7 +101,7 @@
       <a-card :title="drillMode ? '销售产品明细' : '产品线明细'" size="small" class="section">
         <a-table
           :columns="productTableColumns"
-          :data-source="breakdowns"
+          :data-source="displayBreakdowns"
           :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (t: number) => `共 ${t} 条` }"
           row-key="dimension_value"
           size="small"
@@ -134,6 +140,26 @@
     <div v-if="showAssistant" class="analysis-assistant">
       <FinancialAssistantPanel :context="assistantContext" />
     </div>
+
+    <!-- Calculation Rules -->
+    <a-collapse :bordered="false" class="calc-rules-section" style="margin-top: 16px">
+      <a-collapse-panel header="计算规则说明" key="rules">
+        <a-descriptions :column="1" size="small" bordered>
+          <a-descriptions-item label="同比 (YoY)">
+            (当期值 - 去年同期值) / 去年同期值 x 100%
+          </a-descriptions-item>
+          <a-descriptions-item label="环比 (MoM)">
+            (当期值 - 上期值) / 上期值 x 100%
+          </a-descriptions-item>
+          <a-descriptions-item label="毛利率">
+            毛利额 / 营业收入 x 100%
+          </a-descriptions-item>
+          <a-descriptions-item label="筛选影响">
+            选择产品线后，同比/环比的分母（基期数据）也按相同产品线过滤，确保对比口径一致。未选择时使用公司整体数据。增长率超过100%属于正常现象，表示当期收入超过基期一倍以上。
+          </a-descriptions-item>
+        </a-descriptions>
+      </a-collapse-panel>
+    </a-collapse>
   </div>
 </template>
 
@@ -146,7 +172,8 @@ import FinancialAssistantPanel from '@/components/ai/FinancialAssistantPanel.vue
 import { getCoreMetrics } from '@/api/metrics';
 import { getFilterOptions } from '@/api/filters';
 import type { CoreMetricsResponse, BreakdownItem } from '@/types/metrics';
-import { toWan, formatWan } from '@/utils/format';
+import { toWan, formatPercent, formatWan } from '@/utils/format';
+import { buildPeriodOptions, formatMonthValue, getDefaultPeriod, normalizePeriodDimension } from '@/utils/period';
 
 const isSmall = ref(window.innerWidth < 1024);
 function updateSize() { isSmall.value = window.innerWidth < 1024; }
@@ -155,11 +182,14 @@ onUnmounted(() => window.removeEventListener('resize', updateSize));
 const showAssistant = computed(() => !isSmall.value);
 
 // Filter state
-const periodDimension = ref<string>('yearly');
+const periodDimension = ref<string>('cumulative');
 const selectedPeriod = ref<string | undefined>();
 const compareBase = ref<string>('yoy');
 const selectedProduct = ref<string | undefined>();
+const secondaryDimension = ref<string>('customer');
 const customRange = ref<[any, any] | null>(null);
+const periodStart = ref<string | undefined>();
+const periodEnd = ref<string | undefined>();
 const allPeriods = ref<string[]>([]);
 const productOptions = ref<Array<{ label: string; value: string }>>([]);
 const loading = ref(false);
@@ -174,66 +204,59 @@ const currentDimension = computed(() => drillMode.value ? 'sales_product' : 'pro
 
 // Derived period
 const period = computed(() => {
-  if (periodDimension.value === 'monthly') return selectedPeriod.value;
-  if (periodDimension.value === 'yearly') return selectedPeriod.value ? selectedPeriod.value.slice(0, 4) : undefined;
-  if (periodDimension.value === 'weekly') {
-    if (selectedPeriod.value && selectedPeriod.value.includes('-Q')) {
-      const [y, qStr] = selectedPeriod.value.split('-Q');
-      return `${y}-${String(parseInt(qStr) * 3).padStart(2, '0')}`;
-    }
-    return selectedPeriod.value;
-  }
-  return undefined;
+  return periodDimension.value === 'custom' ? undefined : selectedPeriod.value;
 });
 
 // Period select options
 const periodSelectOptions = computed<Array<{ label: string; value: string }>>(() => {
-  if (periodDimension.value === 'weekly') {
-    const quarters = new Set<string>();
-    for (const p of allPeriods.value) {
-      if (p.includes('-')) {
-        const [y, m] = p.split('-');
-        quarters.add(`${y}-Q${Math.ceil(parseInt(m) / 3)}`);
-      }
-    }
-    return [...quarters].sort().reverse().map((v) => ({ label: v, value: v }));
-  }
-  if (periodDimension.value === 'yearly') {
-    const years = new Set<string>();
-    for (const p of allPeriods.value) { if (p.includes('-')) years.add(p.split('-')[0]); }
-    return [...years].sort().reverse().map((y) => ({ label: `${y}年`, value: `${y}` }));
-  }
-  const months = new Set<string>();
-  for (const p of allPeriods.value) { if (p.includes('-')) months.add(`${p.split('-')[0]}-${p.split('-')[1]}`); }
-  return [...months].sort().reverse().map((v) => {
-    const [y, m] = v.split('-');
-    return { label: `${y}年${parseInt(m)}月`, value: `${y}-${m}` };
-  });
+  return buildPeriodOptions(allPeriods.value, normalizePeriodDimension(periodDimension.value));
 });
 
-function onCustomRangeChange(_dates: any) {}
+function onCustomRangeChange(dates: any) {
+  if (dates && dates[0] && dates[1]) {
+    periodStart.value = formatMonthValue(dates[0]);
+    periodEnd.value = formatMonthValue(dates[1]);
+  } else {
+    periodStart.value = undefined;
+    periodEnd.value = undefined;
+  }
+}
 
 watch(periodDimension, () => {
-  const opts = periodSelectOptions.value;
-  if (opts.length) selectedPeriod.value = opts[0].value;
+  selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
 });
 
 const summary = computed(() => metricsData.value?.summary);
-const breakdowns = computed<BreakdownItem[]>(() => metricsData.value?.breakdowns || []);
 
-const lossRatio = computed(() => {
-  if (summary.value?.negative_margin_product_ratio !== undefined && summary.value.negative_margin_product_ratio !== null) {
-    return summary.value.negative_margin_product_ratio;
+// Secondary dimension toggle: switch between customer and contract_type breakdown
+const displayBreakdowns = computed<BreakdownItem[]>(() => {
+  if (drillMode.value) {
+    return metricsData.value?.breakdowns || [];
   }
-  const items = breakdowns.value;
-  if (!items.length) return 0;
-  const lossCount = items.filter((b) => (b.gross_profit || 0) < 0).length;
-  return Math.round((lossCount / items.length) * 100);
+  if (selectedProduct.value && secondaryDimension.value) {
+    if (secondaryDimension.value === 'contract_type') {
+      return metricsData.value?.contract_type_breakdown || [];
+    }
+    return metricsData.value?.customer_breakdown || [];
+  }
+  return metricsData.value?.breakdowns || [];
 });
+
+const secondaryDimLabel = computed(() => {
+  if (secondaryDimension.value === 'contract_type') return '合同类型';
+  return '客户';
+});
+
+// Dynamic trend fields based on compare mode
+const isMom = computed(() => compareBase.value === 'mom');
+const revTrend = computed(() => isMom.value ? summary.value?.revenue_mom_growth : summary.value?.revenue_yoy_growth);
+const gpTrend = computed(() => isMom.value ? summary.value?.gross_profit_mom_growth : summary.value?.gross_profit_yoy_growth);
+const gmTrend = computed(() => isMom.value ? summary.value?.gross_margin_mom_change : summary.value?.gross_margin_yoy_change);
+const negMarginTrend = computed(() => isMom.value ? summary.value?.negative_margin_product_mom_change : summary.value?.negative_margin_product_yoy_change);
 
 // Table columns
 const productTableColumns = computed(() => [
-  { title: drillMode.value ? '销售产品' : '产品线', dataIndex: 'dimension_value', key: 'dimension_value', width: 160, fixed: 'left' },
+  { title: drillMode.value ? '销售产品' : secondaryDimLabel.value, dataIndex: 'dimension_value', key: 'dimension_value', width: 160, fixed: 'left' },
   { title: '收入(万元)', key: 'revenue', width: 120 },
   { title: '收入贡献度', key: 'revenue_contribution', width: 120 },
   { title: '毛利(万元)', key: 'gross_profit', width: 120 },
@@ -244,9 +267,7 @@ const productTableColumns = computed(() => [
 ]);
 
 function formatMargin(v: number | string | undefined | null): string {
-  if (v == null || v === '') return '-';
-  const n = typeof v === 'number' ? v : Number(v);
-  return isNaN(n) ? '-' : n.toFixed(2) + '%';
+  return formatPercent(v);
 }
 
 // Drill-down functions
@@ -270,46 +291,58 @@ function onChartClick(name: string) {
 
 // Chart 1: Product revenue ranking (bar)
 const productRevenueRanking = computed(() =>
-  [...breakdowns.value]
+  [...displayBreakdowns.value]
     .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
-    .slice(0, 8)
+    .slice(0, 10)
     .map((b) => ({
-      [drillMode.value ? '销售产品' : '产品线']: b.dimension_value,
-      收入: b.revenue || 0,
+      [drillMode.value ? '销售产品' : secondaryDimLabel.value]: b.dimension_value,
+      '收入(万元)': Math.round((toWan(b.revenue) || 0) * 100) / 100,
     }))
 );
 
-// Chart 2: Product revenue + gross profit grouped horizontal bar
+// Chart 2: Product revenue + gross profit + margin bar-line
 const productRevenueMarginCompare = computed(() =>
-  breakdowns.value.map((b) => ({
-    产品线: b.dimension_value,
-    营业收入: b.revenue || 0,
-    毛利额: b.gross_profit || 0,
-  }))
+  [...displayBreakdowns.value]
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
+    .slice(0, 10)
+    .map((b) => ({
+      [secondaryDimLabel.value]: b.dimension_value,
+      '营业收入(万元)': b.revenue || 0,
+      '毛利额(万元)': b.gross_profit || 0,
+      毛利率: b.gross_margin || 0,
+    }))
 );
 
 // Chart 3: Product margin rate pie
 const productMarginPie = computed(() =>
-  breakdowns.value.map((b) => ({
-    产品线: b.dimension_value,
-    毛利率: b.gross_margin || 0,
-  }))
+  [...displayBreakdowns.value]
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
+    .slice(0, 10)
+    .map((b) => ({
+      [secondaryDimLabel.value]: b.dimension_value,
+      毛利率: b.gross_margin || 0,
+    }))
 );
 
 // Chart 4: Product revenue vs gross profit bubble
 const productBubble = computed(() =>
-  breakdowns.value.map((b) => ({
-    产品线: b.dimension_value,
-    收入: b.revenue || 0,
-    毛利额: b.gross_profit || 0,
-    size: b.revenue || 0,
-  }))
+  [...displayBreakdowns.value]
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
+    .slice(0, 10)
+    .map((b) => ({
+      [secondaryDimLabel.value]: b.dimension_value,
+      '收入(万元)': b.revenue || 0,
+      '毛利额(万元)': b.gross_profit || 0,
+      size: b.revenue || 0,
+    }))
 );
 
 const assistantContext = computed(() => ({
   period: period.value,
   product: drillMode.value ? drillProduct.value : selectedProduct.value,
   period_dimension: periodDimension.value,
+  period_start: periodStart.value,
+  period_end: periodEnd.value,
   period_compare_type: compareBase.value,
   active_section: 'product',
 }));
@@ -323,6 +356,9 @@ async function fetchMetrics() {
       entity: drillMode.value ? undefined : selectedProduct.value,
       product: drillMode.value ? drillProduct.value : undefined,
       period_dimension: periodDimension.value,
+      compare: compareBase.value,
+      period_start: periodStart.value,
+      period_end: periodEnd.value,
     });
     metricsData.value = resp.data as CoreMetricsResponse;
   } finally {
@@ -335,7 +371,7 @@ async function fetchOptions() {
   const periods = ((periodResp.data as any)?.options || []) as string[];
   allPeriods.value = periods;
   if (!selectedPeriod.value && periods.length) {
-    selectedPeriod.value = periodDimension.value === 'yearly' ? periods[periods.length - 1].slice(0, 4) : periods[periods.length - 1];
+    selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
   }
   const { data: prodResp } = await getFilterOptions({ dimension: 'product_line' });
   const prods = ((prodResp.data as any)?.options || []) as string[];
@@ -344,7 +380,7 @@ async function fetchOptions() {
 
 function refresh() { fetchMetrics(); }
 
-watch([periodDimension, selectedPeriod, compareBase, selectedProduct], () => {
+watch([periodDimension, selectedPeriod, compareBase, selectedProduct, periodStart, periodEnd], () => {
   if (!drillMode.value) fetchMetrics();
 });
 

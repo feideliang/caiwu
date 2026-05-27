@@ -17,7 +17,7 @@ export const useInsightsStore = defineStore('insights', () => {
     loading.value = true;
     error.value = '';
     try {
-      const { data } = await getInsights(status ? { status } : undefined);
+      const { data } = await getInsights({ source: 'rules', ...(status ? { status } : {}) });
       const payload = data.data as { items?: Insight[] };
       insights.value = payload.items || [];
     } catch (e: unknown) {

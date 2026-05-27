@@ -12,8 +12,8 @@
       <template v-if="summary">
         <!-- Metrics summary -->
         <a-row :gutter="[16, 16]" class="metrics-row">
-          <a-col v-for="(val, key) in summary.metrics" :key="key" :xs="12" :md="6">
-            <a-statistic :title="formatKey(key)" :value="val" :precision="2" />
+          <a-col v-for="(val, key) in (summary.metrics ?? {})" :key="key" :xs="12" :md="6">
+            <a-statistic :title="formatKey(key)" :value="formatMetric(key, val)" :precision="formatPrecision(key)" />
           </a-col>
         </a-row>
 
@@ -53,6 +53,7 @@ import type { TableColumnsType } from 'ant-design-vue';
 import { getDrillSummary, getDrillDepartments, getDrillProducts } from '@/api/drilldowns';
 import type { DrillSummary, DrillDepartment, DrillProduct } from '@/types/drilldown';
 import { HomeOutlined } from '@ant-design/icons-vue';
+import { toWan, formatWan } from '@/utils/format';
 
 const props = defineProps<{ reportId: string }>();
 const emit = defineEmits<{
@@ -64,31 +65,44 @@ const summary = ref<DrillSummary | null>(null);
 const departments = ref<DrillDepartment[]>([]);
 const products = ref<DrillProduct[]>([]);
 
+const AMOUNT_KEYS = new Set(['total_revenue', 'total_cost', 'total_profit']);
+
+function formatMetric(key: string, val: number): number {
+  if (AMOUNT_KEYS.has(key)) return toWan(val);
+  return val;
+}
+
+function formatPrecision(key: string): number {
+  if (AMOUNT_KEYS.has(key)) return 2;
+  if (key === 'avg_margin') return 2;
+  return 0;
+}
+
 const deptColumns: TableColumnsType = [
   { title: '部门', dataIndex: 'name', key: 'name' },
-  { title: '收入', dataIndex: 'revenue', key: 'revenue' },
-  { title: '成本', dataIndex: 'cost', key: 'cost' },
-  { title: '毛利', dataIndex: 'gross_profit', key: 'gross_profit' },
+  { title: '收入(万元)', dataIndex: 'revenue', key: 'revenue', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '成本(万元)', dataIndex: 'cost', key: 'cost', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '毛利(万元)', dataIndex: 'gross_profit', key: 'gross_profit', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
 ];
 
 const productColumns: TableColumnsType = [
   { title: '产品', dataIndex: 'name', key: 'name' },
   { title: '类别', dataIndex: 'category', key: 'category' },
-  { title: '收入', dataIndex: 'revenue', key: 'revenue' },
+  { title: '收入(万元)', dataIndex: 'revenue', key: 'revenue', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
   {
     title: '毛利率',
     dataIndex: 'margin',
     key: 'margin',
-    customRender: ({ text }: { text: number }) => `${(text * 100).toFixed(2)}%`,
+    customRender: ({ text }: { text: number }) => text != null ? `${(text * 100).toFixed(2)}%` : '-',
   },
 ];
 
 function formatKey(key: string): string {
   const labels: Record<string, string> = {
-    total_revenue: '总收入',
-    total_cost: '总成本',
-    total_profit: '总毛利',
-    avg_margin: '平均毛利率',
+    total_revenue: '总收入(万元)',
+    total_cost: '总成本(万元)',
+    total_profit: '总毛利(万元)',
+    avg_margin: '平均毛利率(%)',
     total_orders: '总订单数',
   };
   return labels[key] || key;

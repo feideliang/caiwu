@@ -18,6 +18,15 @@ export interface TrendItem {
   cost: number;
   gross_profit: number;
   gross_margin: number;
+  revenue_yoy_growth?: number;
+  revenue_mom_growth?: number;
+  gross_profit_yoy_growth?: number;
+  gross_profit_mom_growth?: number;
+  gross_margin_yoy_growth?: number;
+  gross_margin_mom_growth?: number;
+  order_count?: number;
+  order_count_yoy_growth?: number;
+  order_count_mom_growth?: number;
 }
 
 export interface KpiData {
@@ -36,6 +45,8 @@ export interface KpiData {
   profit_cumulative: number;
   revenue_cumulative_growth: number;
   profit_cumulative_growth: number;
+  revenue_consecutive_growth: number | null;
+  gross_profit_consecutive_growth: number | null;
   trend_series: TrendItem[];
 }
 
@@ -70,7 +81,7 @@ export function queryDashboard(data: BffQueryParams) {
   return post<DashboardBff>('/dashboard/bff', data);
 }
 
-export function getInsights(params?: { status?: string; page?: number; page_size?: number }) {
+export function getInsights(params?: { status?: string; page?: number; page_size?: number; source?: string }) {
   return get('/insights', { params });
 }
 

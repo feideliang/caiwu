@@ -63,17 +63,32 @@ class PredictionService:
             logger.info("Prediction task created: id=%d celery_id=%s", prediction.id, celery_result.id)
         else:
             # Run prediction synchronously using async db session
-            from sqlalchemy import select
-            from app.models.core import FinancialData
+            from app.models.core import AggPeriodSummary
             from app.config import settings
 
             logger.info("Running prediction synchronously: id=%d", prediction.id)
 
-            # Fetch historical data
+            # Fetch historical data from AggPeriodSummary
+            metric_col_map = {
+                "revenue": "revenue",
+                "cost": "cost",
+                "gross_profit": "gross_profit",
+                "target_revenue": "target_revenue",
+            }
+            col_name = metric_col_map.get(metric_name)
+            if col_name is None:
+                # Unknown metric: no data source available
+                prediction.accuracy_score = None
+                prediction.model_name = "insufficient_data"
+                prediction.computed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                prediction._insufficient_data_message = f"不支持的预测指标：{metric_name}"
+                await db.flush()
+                return prediction
+
             stmt = (
-                select(FinancialData.metric_value, FinancialData.period)
-                .where(FinancialData.metric_name == metric_name)
-                .order_by(FinancialData.period)
+                select(getattr(AggPeriodSummary, col_name), AggPeriodSummary.period)
+                .where(AggPeriodSummary.bgbu == "ALL")
+                .order_by(AggPeriodSummary.period)
             )
             rows = (await db.execute(stmt)).all()
 
@@ -171,18 +186,28 @@ class PredictionService:
                 accepted = True
                 rejected_reason = f"MAPE {mape_pct:.2f}% 处于警告区间（15-25%），建议复核"
 
-        # Fetch historical values for chart context
+        # Fetch historical values for chart context from AggPeriodSummary
         historical_values = {}
         if db is not None:
-            from app.models.core import FinancialData
-            stmt = (
-                select(FinancialData.period, FinancialData.metric_value)
-                .where(FinancialData.metric_name == prediction.metric_name)
-                .order_by(FinancialData.period)
-            )
-            rows = (await db.execute(stmt)).all()
-            for period, value in rows:
-                historical_values[str(period)] = round(float(value), 2)
+            from app.models.core import AggPeriodSummary
+
+            metric_col_map = {
+                "revenue": AggPeriodSummary.revenue,
+                "cost": AggPeriodSummary.cost,
+                "gross_profit": AggPeriodSummary.gross_profit,
+                "target_revenue": AggPeriodSummary.target_revenue,
+            }
+            agg_col = metric_col_map.get(prediction.metric_name)
+            if agg_col is not None:
+                stmt = (
+                    select(AggPeriodSummary.period, agg_col)
+                    .where(AggPeriodSummary.bgbu == "ALL")
+                    .order_by(AggPeriodSummary.period)
+                )
+                rows = (await db.execute(stmt)).all()
+                for period, value in rows:
+                    if value:
+                        historical_values[str(period)] = round(float(value), 2)
 
         # Build message for insufficient data
         insufficient_msg = getattr(prediction, '_insufficient_data_message', None) or None

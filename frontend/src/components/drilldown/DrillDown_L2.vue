@@ -28,6 +28,7 @@ import type { TableColumnsType } from 'ant-design-vue';
 import { getDrillProductsByDept } from '@/api/drilldowns';
 import type { DrillProduct } from '@/types/drilldown';
 import { ApartmentOutlined } from '@ant-design/icons-vue';
+import { formatWan } from '@/utils/format';
 
 const props = defineProps<{
   reportId: string;
@@ -45,13 +46,13 @@ const products = ref<DrillProduct[]>([]);
 const columns: TableColumnsType = [
   { title: '产品名称', dataIndex: 'name', key: 'name', ellipsis: true },
   { title: '类别', dataIndex: 'category', key: 'category' },
-  { title: '收入', dataIndex: 'revenue', key: 'revenue' },
-  { title: '成本', dataIndex: 'cost', key: 'cost' },
+  { title: '收入(万元)', dataIndex: 'revenue', key: 'revenue', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
+  { title: '成本(万元)', dataIndex: 'cost', key: 'cost', customRender: ({ text }: { text: number }) => formatWan(text, 2) },
   {
     title: '毛利率',
     dataIndex: 'margin',
     key: 'margin',
-    customRender: ({ text }: { text: number }) => `${(text * 100).toFixed(2)}%`,
+    customRender: ({ text }: { text: number }) => text != null ? `${(text * 100).toFixed(2)}%` : '-',
   },
   { title: '销量', dataIndex: 'sales_count', key: 'sales_count' },
 ];
@@ -65,7 +66,7 @@ onMounted(async () => {
   try {
     if (props.departmentId) {
       const { data } = await getDrillProductsByDept(props.reportId, props.departmentId);
-      products.value = data.data as DrillProduct[];
+      products.value = (data?.data ?? []) as DrillProduct[];
     }
   } finally {
     loading.value = false;

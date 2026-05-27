@@ -8,11 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ResourceNotFoundError
 from app.core.response import APIResponse
-from app.core.security import get_current_user, get_data_scope_filter, TokenPayload, require_permission
+from app.core.security import get_current_user
 from app.db.session import get_db
 from app.schemas.query import QueryRequest, QueryResponse
 from app.models.core import (
-    FinancialData,
     DataBatch,
     DataSource,
     DataQualityLog,
@@ -35,7 +34,6 @@ from app.models.v4 import AuditLog, Notification, User, Role
 router = APIRouter(prefix="/query", tags=["query"])
 
 _TABLE_MAP: dict[str, type] = {
-    "financial_data": FinancialData,
     "data_batch": DataBatch,
     "data_source": DataSource,
     "data_quality_log": DataQualityLog,
@@ -57,7 +55,7 @@ _TABLE_MAP: dict[str, type] = {
 }
 
 _READ_ONLY_TABLES = {
-    "financial_data", "data_batch", "data_quality_log", "insight",
+    "data_batch", "data_quality_log", "insight",
     "correlation_result", "correlation_calibration", "prediction_result",
 }
 
@@ -74,12 +72,6 @@ async def execute_query(
         raise ResourceNotFoundError(f"Unknown table: {body.table}")
 
     stmt = select(model)
-
-    # Apply department scope for financial_data table
-    if body.table == "financial_data" and isinstance(_user, TokenPayload):
-        scope_filter = get_data_scope_filter(_user, model)
-        if scope_filter is not True:
-            stmt = stmt.where(scope_filter)
 
     # Apply field selection
     if body.fields:
@@ -123,11 +115,6 @@ async def execute_query(
     from sqlalchemy import func
 
     count_stmt = select(func.count()).select_from(model)
-    # Apply department scope for financial_data count
-    if body.table == "financial_data" and isinstance(_user, TokenPayload):
-        scope_filter = get_data_scope_filter(_user, model)
-        if scope_filter is not True:
-            count_stmt = count_stmt.where(scope_filter)
     # Re-apply filters to count
     for f in body.filters:
         if not hasattr(model, f.field):

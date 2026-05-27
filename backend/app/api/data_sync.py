@@ -167,3 +167,51 @@ async def test_mysql_connection(
     if result["status"] == "ok":
         return APIResponse.success(data=result, message="MySQL 连接成功")
     return APIResponse.error(code=ErrorCode.INTERNAL_ERROR, message=result.get("error", "连接失败"))
+
+
+# ── Aggregation: income_margin_detail → agg tables ──────────
+
+@router.post("/aggregate", response_model=APIResponse)
+async def run_aggregation(
+    _admin=Depends(require_role("admin")),
+) -> APIResponse:
+    """Trigger aggregation from income_margin_detail to summary tables + flush Redis cache."""
+    import time
+    import asyncpg
+    from app.core.cache import cache_delete_pattern
+
+    DSN = "postgresql://learnhouse:learnhouse@localhost:5432/caiwu"
+
+    t0 = time.time()
+
+    # Import SQL from the aggregation script
+    from scripts.aggregate_metrics import DDL, AGG_PERIOD, AGG_DIMENSION, AGG_ORDER
+
+    conn = await asyncpg.connect(DSN)
+    try:
+        await conn.execute(DDL)
+        await conn.execute("TRUNCATE agg_period_summary, agg_dimension_summary, agg_order_summary")
+
+        r1 = await conn.execute(AGG_PERIOD)
+        r2 = await conn.execute(AGG_DIMENSION)
+        r3 = await conn.execute(AGG_ORDER)
+
+        # Verify
+        counts = {}
+        for t in ["agg_period_summary", "agg_dimension_summary", "agg_order_summary"]:
+            counts[t] = await conn.fetchval(f"SELECT count(*) FROM {t}")
+    finally:
+        await conn.close()
+
+    # Flush Redis cache
+    try:
+        await cache_delete_pattern("metrics:*")
+        await cache_delete_pattern("dashboard:*")
+    except Exception:
+        pass
+
+    elapsed = round(time.time() - t0, 1)
+    return APIResponse.success(
+        data={"rows": counts, "elapsed_seconds": elapsed},
+        message=f"聚合完成 ({elapsed}s)",
+    )

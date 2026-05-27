@@ -8,6 +8,7 @@
           <a-table-column title="用户名" dataIndex="username" />
           <a-table-column title="邮箱" dataIndex="email" />
           <a-table-column title="角色" dataIndex="role"><template #default="{ text }"><a-tag>{{ text }}</a-tag></template></a-table-column>
+	          <a-table-column title="事业部" dataIndex="department" key="department" />
           <a-table-column title="操作"><template #default="{ record }"><a-button type="link" danger @click="handleDeleteUser(record.id)">删除</a-button></template></a-table-column>
         </a-table>
         <a-modal v-model:visible="userModal" title="添加用户" @ok="handleCreateUser">
@@ -16,6 +17,7 @@
             <a-form-item label="密码"><a-input-password v-model:value="newUser.password" /></a-form-item>
             <a-form-item label="邮箱"><a-input v-model:value="newUser.email" /></a-form-item>
             <a-form-item label="角色"><a-select v-model:value="newUser.role_id"><a-select-option :value="2">分析师</a-select-option><a-select-option :value="3">观察者</a-select-option></a-select></a-form-item>
+	            <a-form-item label="事业部" name="department"><a-input v-model:value="newUser.department" placeholder="例如: CBG" /></a-form-item>
           </a-form>
         </a-modal>
       </a-tab-pane>
@@ -26,18 +28,18 @@
         <div style="margin-bottom: 16px; display: flex; gap: 8px">
           <a-button type="primary" @click="openRuleModal()">添加规则</a-button>
           <a-button @click="importModal = true">批量导入</a-button>
-          <a-select v-model:value="ruleFilter" style="width: 160px" placeholder="按分类筛选" allow-clear @change="loadRules">
-            <a-select-option value="anomaly_gross_margin">毛利率异常</a-select-option>
-            <a-select-option value="trend_detection">趋势检测</a-select-option>
-            <a-select-option value="concentration_risk">集中度风险</a-select-option>
-            <a-select-option value="drilldown_trigger">下钻触发</a-select-option>
-            <a-select-option value="drilldown_path">下钻路径</a-select-option>
-            <a-select-option value="calculation">计算公式</a-select-option>
-            <a-select-option value="period_compare_yoy">同比分析</a-select-option>
-            <a-select-option value="period_compare_mom">环比分析</a-select-option>
-            <a-select-option value="period_compare_cum">累计分析</a-select-option>
-            <a-select-option value="report_structure">报告结构</a-select-option>
-          </a-select>
+            <a-select v-model:value="ruleFilter" style="width: 160px" placeholder="按分类筛选" allow-clear @change="loadRules">
+              <a-select-option value="gross_margin_change_analysis">毛利率变动分析</a-select-option>
+              <a-select-option value="market_line_analysis">市场线分析</a-select-option>
+              <a-select-option value="margin_health">毛利健康度</a-select-option>
+              <a-select-option value="monthly_trend">月度趋势</a-select-option>
+              <a-select-option value="yoy_mom_compare">同比环比分析</a-select-option>
+              <a-select-option value="period_filter_rules">周期筛选规则</a-select-option>
+              <a-select-option value="product_structure_analysis">产品结构分析</a-select-option>
+              <a-select-option value="department_performance">部门绩效分析</a-select-option>
+              <a-select-option value="customer_structure_analysis">客户结构分析</a-select-option>
+              <a-select-option value="report_structure">报告结构</a-select-option>
+            </a-select>
         </div>
         <a-table :dataSource="rules" :loading="loadings.rules" rowKey="id" size="small">
           <a-table-column title="分类" dataIndex="category" width="160"><template #default="{ text }"><a-tag>{{ text }}</a-tag></template></a-table-column>
@@ -98,7 +100,7 @@ const auditLogs = ref<any[]>([])
 const rules = ref<any[]>([])
 const loadings = ref({ users: false, logs: false, rules: false })
 const userModal = ref(false)
-const newUser = ref({ username: '', password: '', email: '', role_id: 2 })
+const newUser = ref({ username: '', password: '', email: '', role_id: 2, department: '' })
 
 // Rules management
 const ruleFilter = ref<string | undefined>(undefined)
@@ -113,7 +115,7 @@ const loadRules = async () => {
   try {
     const r = await listRules(ruleFilter.value || undefined)
     rules.value = (r.data?.data as any[]) || []
-  } finally { loadings.value.rules = false }
+  } catch (e) { console.error('loadRules failed', e) } finally { loadings.value.rules = false }
 }
 const openRuleModal = (record?: any) => {
   editingRule.value = record || null
@@ -123,15 +125,20 @@ const openRuleModal = (record?: any) => {
   ruleModalVisible.value = true
 }
 const handleSaveRule = async () => {
-  if (editingRule.value) {
-    await updateRule(editingRule.value.id, ruleForm.value)
-    message.success('规则已更新')
-  } else {
-    await createRule(ruleForm.value)
-    message.success('规则已创建')
+  try {
+    if (editingRule.value) {
+      await updateRule(editingRule.value.id, ruleForm.value)
+      message.success('规则已更新')
+    } else {
+      await createRule(ruleForm.value)
+      message.success('规则已创建')
+    }
+    ruleModalVisible.value = false
+    await loadRules()
+  } catch (e) {
+    console.error('handleSaveRule failed', e)
+    message.error('保存失败，请重试')
   }
-  ruleModalVisible.value = false
-  await loadRules()
 }
 const handleDeleteRule = (id: number) => {
   Modal.confirm({ title: '确认删除此规则？', onOk: async () => { await deleteRule(id); message.success('已删除'); await loadRules() } })
@@ -152,18 +159,23 @@ const handleImport = async () => {
 
 const loadUsers = async () => {
   loadings.value.users = true
-  try { const r = await getUsers(); users.value = (r.data?.data as { items?: any[] })?.items || [] } finally { loadings.value.users = false }
+  try { const r = await getUsers(); users.value = (r.data?.data as { items?: any[] })?.items || [] } catch (e) { console.error('loadUsers failed', e) } finally { loadings.value.users = false }
 }
 const loadAuditLogs = async () => {
   loadings.value.logs = true
-  try { const r = await getAuditLogs({ page: 1, page_size: 50 }); auditLogs.value = (r.data?.data as { items?: any[] })?.items || [] } finally { loadings.value.logs = false }
+  try { const r = await getAuditLogs({ page: 1, page_size: 50 }); auditLogs.value = (r.data?.data as { items?: any[] })?.items || [] } catch (e) { console.error('loadAuditLogs failed', e) } finally { loadings.value.logs = false }
 }
 const onTabChange = (key: string) => { if (key === 'users') loadUsers(); if (key === 'audit') loadAuditLogs(); if (key === 'rules') loadRules() }
 const handleCreateUser = async () => {
-  await createUser(newUser.value)
-  userModal.value = false; message.success('用户已创建')
-  newUser.value = { username: '', password: '', email: '', role_id: 2 }
-  await loadUsers()
+  try {
+    await createUser(newUser.value)
+    userModal.value = false; message.success('用户已创建')
+    newUser.value = { username: '', password: '', email: '', role_id: 2, department: '' }
+    await loadUsers()
+  } catch (e) {
+    console.error('handleCreateUser failed', e)
+    message.error('创建用户失败，请重试')
+  }
 }
 const handleDeleteUser = (id: number) => {
   Modal.confirm({ title: '确认删除用户？', onOk: async () => { await deleteUser(id); message.success('已删除'); await loadUsers() } })

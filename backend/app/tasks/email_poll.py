@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from app.celery_app import celery_app
+from app.services.metrics_service import compute_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,7 @@ def _sync_incremental_sync(session, df, msg, attachment) -> dict:
                     batch_id=batch.id, metric_name=metric_name, metric_value=metric_value,
                     metric_unit=metric_unit, period=period, entity=entity, tags=tags,
                     raw_row=dict(row) if not row.empty else None,
+                    bucket=compute_bucket(metric_name),
                 ))
                 inserted += 1
         except Exception as exc:

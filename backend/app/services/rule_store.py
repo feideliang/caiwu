@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import functools
+import time
+
 import httpx
 import logging
 
@@ -15,6 +18,10 @@ logger = logging.getLogger(__name__)
 COLLECTION = "knowledge_rules"
 
 _client: QdrantClient | None = None
+
+# In-memory cache for embeddings: {text: (timestamp, vector)}
+_embed_cache: dict[str, tuple[float, list[float]]] = {}
+_EMBED_CACHE_TTL = 3600  # 1 hour
 
 
 def get_qdrant_client() -> QdrantClient:
@@ -38,7 +45,15 @@ def ensure_collection() -> None:
 
 
 async def embed_text(text: str) -> list[float] | None:
-    """Embed text using the configured embedding model via Qwen API endpoint."""
+    """Embed text using the configured embedding model via Qwen API endpoint.
+
+    Results are cached in-memory for _EMBED_CACHE_TTL seconds to avoid redundant API calls.
+    """
+    now = time.time()
+    cached = _embed_cache.get(text)
+    if cached and (now - cached[0]) < _EMBED_CACHE_TTL:
+        return cached[1]
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -48,7 +63,9 @@ async def embed_text(text: str) -> list[float] | None:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                return data["data"][0]["embedding"]
+                vector = data["data"][0]["embedding"]
+                _embed_cache[text] = (now, vector)
+                return vector
             logger.warning(f"Embedding API returned {resp.status_code}")
     except Exception as e:
         logger.warning(f"Embedding failed: {e}")

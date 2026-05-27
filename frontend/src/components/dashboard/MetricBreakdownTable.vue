@@ -19,7 +19,7 @@
       </template>
       <template v-else-if="column.key === 'calculable'">
         <a-tag v-if="record.calculable" color="green">完整</a-tag>
-        <a-tooltip v-else :title="`缺失：${record.missing_fields.join(', ')}`">
+        <a-tooltip v-else :title="`缺失：${(record.missing_fields ?? []).join(', ')}`">
           <a-tag color="orange">缺失</a-tag>
         </a-tooltip>
       </template>
@@ -30,7 +30,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { BreakdownItem } from '@/types/metrics';
-import { toWan } from '@/utils/format';
+import { formatPercent, formatWan } from '@/utils/format';
 
 const props = defineProps<{
   breakdowns: BreakdownItem[];
@@ -44,20 +44,13 @@ const columns = computed(() => [
   { title: '毛利额(万元)', dataIndex: 'gross_profit', key: 'gross_profit', sorter: (a: BreakdownItem, b: BreakdownItem) => (a.gross_profit || 0) - (b.gross_profit || 0) },
   { title: '毛利率', dataIndex: 'gross_margin', key: 'gross_margin' },
   { title: '毛利贡献度', dataIndex: 'gross_margin_contribution', key: 'gross_margin_contribution' },
-  { title: '收入环比', dataIndex: 'revenue_mom_growth', key: 'revenue_mom_growth' },
-  { title: '毛利环比', dataIndex: 'gross_profit_mom_growth', key: 'gross_profit_mom_growth' },
-  { title: '数据状态', dataIndex: 'calculable', key: 'calculable', width: 100 },
+    { title: '数据状态', dataIndex: 'calculable', key: 'calculable', width: 100 },
 ]);
 
 const rows = computed(() => props.breakdowns || []);
 
 function formatNumber(v: number | undefined): string {
-  if (v === undefined || v === null) return '-';
-  return toWan(v).toLocaleString('zh-CN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
-}
-function formatPercent(v: number | undefined): string {
-  if (v === undefined || v === null) return '-';
-  return `${v.toFixed(2)}%`;
+  return formatWan(v);
 }
 function trendClass(v: number | undefined): string {
   if (v === undefined || v === null) return '';

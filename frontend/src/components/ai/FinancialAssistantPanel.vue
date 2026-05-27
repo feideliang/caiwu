@@ -15,8 +15,11 @@
         <div class="message-label">
           {{ msg.role === 'user' ? '你' : '助手' }}
         </div>
-        <div class="message-content">
-          {{ msg.content }}
+        <div
+          class="message-content markdown-body"
+          :class="{ 'is-assistant': msg.role === 'assistant' }"
+          v-html="msg.role === 'assistant' ? renderMarkdown(msg.content) : renderPlainText(msg.content)"
+        >
         </div>
         <!-- References -->
         <div v-if="msg.references && msg.references.length" class="message-references">
@@ -60,7 +63,7 @@
             type="primary"
             size="small"
             :loading="loading"
-            :disabled="!inputText.trim()"
+            :disabled="!String(inputText || '').trim()"
             @click="sendMessage"
           >
             发送
@@ -189,6 +192,80 @@ function onModelChange() {
   // Model changed, will be used in next request
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function inlineMarkdown(text: string): string {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function renderPlainText(text: string): string {
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
+function renderMarkdown(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const html: string[] = [];
+  let inList = false;
+  let paragraph: string[] = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html.push(`<p>${paragraph.map(line => inlineMarkdown(line)).join('<br>')}</p>`);
+    paragraph = [];
+  };
+
+  const closeList = () => {
+    if (!inList) return;
+    html.push('</ul>');
+    inList = false;
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+    if (/^(#{1,3})\s+/.test(line)) {
+      flushParagraph();
+      closeList();
+      const level = Math.min(3, line.match(/^#+/)?.[0].length || 1);
+      html.push(`<h${level}>${inlineMarkdown(line.replace(/^#{1,3}\s+/, ''))}</h${level}>`);
+      continue;
+    }
+    if (/^[一二三四五六七八九十]+[、.．]/.test(line)) {
+      flushParagraph();
+      closeList();
+      html.push(`<h3>${inlineMarkdown(line)}</h3>`);
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      flushParagraph();
+      if (!inList) {
+        html.push('<ul>');
+        inList = true;
+      }
+      html.push(`<li>${inlineMarkdown(line.replace(/^[-*]\s+/, ''))}</li>`);
+      continue;
+    }
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  closeList();
+  return html.join('');
+}
+
 // Auto-scroll when messages change
 watch(messages, async () => {
   await nextTick();
@@ -258,6 +335,45 @@ watch(messages, async () => {
   line-height: 1.6;
   max-width: 90%;
   word-break: break-word;
+}
+
+.markdown-body {
+  :deep(h1),
+  :deep(h2),
+  :deep(h3) {
+    margin: 0 0 8px;
+    font-weight: 700;
+    line-height: 1.5;
+  }
+
+  :deep(h3) {
+    font-size: 14px;
+  }
+
+  :deep(p) {
+    margin: 0 0 8px;
+  }
+
+  :deep(ul) {
+    margin: 0 0 8px 18px;
+    padding: 0;
+  }
+
+  :deep(li) {
+    margin-bottom: 4px;
+  }
+
+  :deep(strong) {
+    color: #1677ff;
+    font-weight: 700;
+  }
+
+  :deep(code) {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.04);
+    font-family: Consolas, 'Courier New', monospace;
+  }
 }
 
 .message-references {

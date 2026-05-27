@@ -30,10 +30,13 @@ async def get_core_metrics(
     db: AsyncSession = Depends(get_db),
     user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
-    # Enforce department scope for non-admin users
-    effective_department = department
+    # Determine bgbu_filter from user.department or explicit department param
+    bgbu_filter = "ALL"
     if user.role != "admin" and user.department:
-        effective_department = user.department
+        bgbu_filter = user.department
+    elif department:
+        bgbu_filter = department
+
     result = await MetricsService.get_core_metrics(
         db=db,
         period=period,
@@ -46,7 +49,7 @@ async def get_core_metrics(
         period_end=period_end,
         high_margin_threshold=high_margin_threshold,
         product=product,
-        department=effective_department,
         customer=customer,
+        bgbu_filter=bgbu_filter,
     )
     return APIResponse.success(data=result.model_dump())

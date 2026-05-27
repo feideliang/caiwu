@@ -6,6 +6,7 @@ from celery import Celery
 from celery.schedules import crontab
 
 from app.config import settings
+from celery.schedules import crontab
 
 
 def _celery_url(kind: str) -> str:
@@ -71,6 +72,14 @@ def create_celery_app() -> Celery:
             "daily-email-poll": {
                 "task": "email_poll.poll_emails",
                 "schedule": crontab(hour=settings.email_poll_hour, minute=settings.email_poll_minute),
+            },
+            "daily-rule-audit": {
+                "task": "rule_audit.audit_all_rules",
+                "schedule": crontab(hour=3, minute=0),  # daily at 03:00
+            },
+            "daily-dimension-sync": {
+                "task": "dim_sync.sync_all_dimensions",
+                "schedule": crontab(hour=4, minute=0),  # daily at 04:00
             },
         },
     )

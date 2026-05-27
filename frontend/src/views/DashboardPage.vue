@@ -58,7 +58,6 @@ import {
   formatMonthValue,
   getDefaultPeriod,
   normalizePeriodDimension,
-  quarterEndMonth,
 } from '@/utils/period';
 
 const isSmall = ref(window.innerWidth < 1024);
@@ -79,8 +78,8 @@ const productOptions = ref<Array<{ label: string; value: string }>>([]);
 const allPeriods = ref<string[]>([]);
 
 const period = computed(() => {
-  if (periodDimension.value === 'quarterly' && selectedPeriod.value) return quarterEndMonth(selectedPeriod.value);
-  return periodDimension.value === 'custom' ? undefined : selectedPeriod.value;
+  if (periodDimension.value === 'custom') return undefined;
+  return selectedPeriod.value;
 });
 
 const periodSelectOptions = computed<Array<{ label: string; value: string }>>(() => {

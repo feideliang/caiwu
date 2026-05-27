@@ -7,15 +7,16 @@
             <!-- Period dimension selector -->
             <a-select v-model:value="periodDimension" style="width: 120px" placeholder="周期维度">
               <a-select-option value="monthly">月度</a-select-option>
-              <a-select-option value="weekly">季度</a-select-option>
-              <a-select-option value="yearly">年累计</a-select-option>
+              <a-select-option value="quarterly">季度</a-select-option>
+              <a-select-option value="cumulative">年累计</a-select-option>
             </a-select>
             <!-- Period selector with dynamic options based on dimension -->
             <a-select v-model:value="selectedPeriod" :options="periodSelectOptions" style="width: 160px" placeholder="筛选周期" allow-clear />
             <!-- Dimension selector -->
             <a-select v-model:value="trendDimension" :options="dimensionOptions" style="width: 140px" placeholder="维度" />
             <!-- Entity selector (hidden for company) -->
-            <a-select v-if="trendDimension !== 'company'" v-model:value="selectedEntity" :options="entityOptions" style="width: 180px" placeholder="实体" allow-clear />
+            <a-select v-if="trendDimension !== 'company' && !(trendDimension === 'department' && authStore.isDeptRestricted)" v-model:value="selectedEntity" :options="entityOptions" style="width: 180px" placeholder="实体" allow-clear />
+            <a-tag v-if="trendDimension === 'department' && authStore.isDeptRestricted" color="blue">{{ authStore.department }}</a-tag>
             <a-button type="primary" @click="refresh">刷新</a-button>
           </a-space>
         </template>
@@ -35,42 +36,63 @@
       <!-- KPI Cards -->
       <a-row :gutter="[16, 16]" class="kpi-row">
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="收入" :value="toWan(summary?.revenue)" unit="万元" :trend="summary?.revenue_mom_growth" />
+          <KpiCard title="收入" :value="toWan(summary?.revenue)" unit="万元" :precision="0" :trend="compareBase === 'mom' ? summary?.revenue_mom_growth : summary?.revenue_yoy_growth" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="毛利额" :value="toWan(summary?.gross_profit)" unit="万元" :trend="summary?.gross_profit_mom_growth" />
+          <KpiCard title="毛利额" :value="toWan(summary?.gross_profit)" unit="万元" :precision="0" :trend="compareBase === 'mom' ? summary?.gross_profit_mom_growth : summary?.gross_profit_yoy_growth" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="订单数" :value="summary?.order_count || 0" unit="笔" />
+          <KpiCard title="订单数" :value="summary?.order_count || 0" unit="笔" :trend="orderCountTrend" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="毛利率" :value="summary?.gross_margin || 0" unit="%" />
+          <KpiCard title="毛利率" :value="summary?.gross_margin || 0" unit="%" :trend="grossMarginTrend" />
         </a-col>
       </a-row>
 
       <!-- Charts Grid -->
       <a-row :gutter="[16, 16]">
         <a-col :xs="24" :md="12">
-          <ChartWidget title="收入趋势" :data="revenueTrendData" chart-type="area" :loading="loading" />
+          <ChartWidget :title="revenueTrendTitle" :data="isMultiDim ? multiRevenueData : revenueTrendData" chart-type="area" :loading="loading" />
         </a-col>
         <a-col :xs="24" :md="12">
-          <ChartWidget title="毛利趋势" :data="profitTrendData" chart-type="line" :loading="loading" />
+          <ChartWidget :title="profitTrendTitle" :data="isMultiDim ? multiProfitData : profitTrendData" chart-type="line" :loading="loading" />
         </a-col>
         <a-col :xs="24" :md="12">
-          <ChartWidget title="毛利率趋势" :data="marginTrendData" chart-type="line" :loading="loading" />
+          <ChartWidget title="毛利率趋势" :data="isMultiDim ? multiMarginData : marginTrendData" :chart-type="isMultiDim ? 'area' : 'line'" :loading="loading" />
         </a-col>
         <a-col :xs="24" :md="12">
-          <ChartWidget title="月度收入分布" :data="monthlyRevenueData" chart-type="bar" :loading="loading" />
+          <ChartWidget title="月度收入分布" :data="isMultiDim ? multiRevenueData : monthlyRevenueData" :chart-type="isMultiDim ? 'bar' : 'bar'" :loading="loading" />
         </a-col>
       </a-row>
     </div>
     <div v-if="showAssistant" class="analysis-assistant">
       <FinancialAssistantPanel :context="assistantContext" />
     </div>
+
+    <!-- Calculation Rules -->
+    <a-collapse :bordered="false" class="calc-rules-section" style="margin-top: 16px">
+      <a-collapse-panel header="计算规则说明" key="rules">
+        <a-descriptions :column="1" size="small" bordered>
+          <a-descriptions-item label="同比 (YoY)">
+            (当期值 - 去年同期值) / 去年同期值 x 100%
+          </a-descriptions-item>
+          <a-descriptions-item label="环比 (MoM)">
+            (当期值 - 上期值) / 上期值 x 100%
+          </a-descriptions-item>
+          <a-descriptions-item label="毛利率同比变动">
+            当期毛利率 - 去年同期毛利率（单位：百分点，非百分比增长率）
+          </a-descriptions-item>
+          <a-descriptions-item label="筛选影响">
+            选择筛选条件后，同比/环比的分母（基期数据）也按相同条件过滤，确保对比口径一致。
+          </a-descriptions-item>
+        </a-descriptions>
+      </a-collapse-panel>
+    </a-collapse>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useAuthStore } from '@/store/auth';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import KpiCard from '@/components/dashboard/KpiCard.vue';
 import ChartWidget from '@/components/dashboard/ChartWidget.vue';
@@ -80,7 +102,9 @@ import { getCoreMetrics } from '@/api/metrics';
 import { getFilterOptions } from '@/api/filters';
 import type { CoreMetricsResponse, TrendDataPoint } from '@/types/metrics';
 import { toWan } from '@/utils/format';
+import { buildPeriodOptions, getDefaultPeriod, normalizePeriodDimension } from '@/utils/period';
 
+const authStore = useAuthStore();
 const isSmall = ref(window.innerWidth < 1024);
 function updateSize() { isSmall.value = window.innerWidth < 1024; }
 onMounted(() => window.addEventListener('resize', updateSize));
@@ -89,12 +113,19 @@ const showAssistant = computed(() => !isSmall.value);
 
 // Filter state
 const periodDimension = ref<string>('monthly');
-const selectedPeriod = ref<string | undefined>('2026-03');
+const selectedPeriod = ref<string | undefined>();
+const compareBase = ref<string>('yoy');
+const dataCaliber = ref<string>('absolute');
 const trendDimension = ref('company');
 const selectedEntity = ref<string | undefined>();
 const loading = ref(false);
 const metricsData = ref<CoreMetricsResponse | null>(null);
+const perEntityTrends = ref<Map<string, TrendDataPoint[]>>(new Map());
 const allPeriods = ref<string[]>([]);
+
+// Whether to show multi-line trend (dimension selected, no specific entity)
+const isMultiDim = computed(() => trendDimension.value !== 'company' && !selectedEntity.value);
+const multiDimLabel = computed(() => trendDimension.value === 'department' ? '部门' : '产品线');
 
 const dimensionOptions = [
   { label: '公司整体', value: 'company' },
@@ -103,85 +134,46 @@ const dimensionOptions = [
 ];
 const entityOptions = ref<Array<{ label: string; value: string }>>([]);
 
-// Derived period: monthly→"2026-03", weekly→last week in selected period, yearly→"2026"
+// Derived period: monthly→"2026-03", quarterly/cumulative/custom resolve through shared period helpers
 const period = computed(() => {
-  if (periodDimension.value === 'monthly') {
-    return selectedPeriod.value;
-  }
-  if (periodDimension.value === 'yearly') {
-    return selectedPeriod.value ? selectedPeriod.value.slice(0, 4) : undefined;
-  }
-  if (periodDimension.value === 'weekly') {
-    // Week string like "2026-W12" → resolve to the month containing that week
-    if (selectedPeriod.value && selectedPeriod.value.includes('-W')) {
-      const [y, wStr] = selectedPeriod.value.split('-W');
-      const w = parseInt(wStr);
-      const month = Math.min(12, Math.ceil(w / 4));
-      return `${y}-${String(month).padStart(2, '0')}`;
-    }
-    return undefined;
-  }
-  return undefined;
+  return selectedPeriod.value;
 });
 
 // Dynamic period select options based on dimension
 const periodSelectOptions = computed<Array<{ label: string; value: string }>>(() => {
-  if (periodDimension.value === 'weekly') {
-    const weeks = new Set<string>();
-    for (const p of allPeriods.value) {
-      if (p.includes('-')) {
-        const [y, m] = p.split('-');
-        const weekNum = Math.ceil(parseInt(m) * 4.33 / 1);
-        weeks.add(`${y}W${weekNum}`);
-      }
-    }
-    return [...weeks].sort().reverse().map((v) => {
-      const match = v.match(/^(\d{4})W(\d+)$/);
-      if (match) {
-        return { label: `${match[1]}年第${match[2]}周`, value: `${match[1]}-${String(Math.min(12, Math.ceil(parseInt(match[2]) / 4.33))).padStart(2, '0')}` };
-      }
-      return { label: v, value: v };
-    });
-  }
-  if (periodDimension.value === 'yearly') {
-    const years = new Set<string>();
-    for (const p of allPeriods.value) {
-      if (p.includes('-')) {
-        const y = p.split('-')[0];
-        years.add(y);
-      }
-    }
-    return [...years].sort().reverse().map((y) => ({ label: `${y}年`, value: `${y}` }));
-  }
-  // monthly
-  const months = new Set<string>();
-  for (const p of allPeriods.value) {
-    if (p.includes('-')) {
-      const [y, m] = p.split('-');
-      months.add(`${y}-${m}`);
-    }
-  }
-  return [...months].sort().reverse().map((v) => {
-    const [y, m] = v.split('-');
-    return { label: `${y}年${parseInt(m)}月`, value: `${y}-${m}` };
-  });
+  return buildPeriodOptions(allPeriods.value, normalizePeriodDimension(periodDimension.value));
 });
 
 // When period dimension changes, reset selectedPeriod to the first option of the new dimension
 watch(periodDimension, () => {
-  const opts = periodSelectOptions.value;
-  if (opts.length) {
-    selectedPeriod.value = opts[0].value;
-  }
+  selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
 });
 
 const summary = computed(() => metricsData.value?.summary);
+
+const revenueTrendTitle = computed(() => {
+  if (isMultiDim.value) return `各${multiDimLabel.value}收入趋势`;
+  if (dataCaliber.value === 'yoy') return '收入趋势（同比%）';
+  if (dataCaliber.value === 'mom') return '收入趋势（环比%）';
+  return '收入趋势';
+});
+
+const profitTrendTitle = computed(() => {
+  if (isMultiDim.value) return `各${multiDimLabel.value}毛利趋势`;
+  if (dataCaliber.value === 'yoy') return '毛利趋势（同比%）';
+  if (dataCaliber.value === 'mom') return '毛利趋势（环比%）';
+  return '毛利趋势';
+});
 
 // Chart 1: Revenue trend (area)
 const revenueTrendData = computed(() =>
   (metricsData.value?.trend_series || []).map((t: TrendDataPoint) => ({
     期间: t.period,
-    收入: toWan(t.revenue),
+    收入: dataCaliber.value === 'yoy'
+      ? (t.revenue_yoy_growth || 0)
+      : dataCaliber.value === 'mom'
+        ? (t.revenue_mom_growth || 0)
+        : toWan(t.revenue),
   }))
 );
 
@@ -189,7 +181,11 @@ const revenueTrendData = computed(() =>
 const profitTrendData = computed(() =>
   (metricsData.value?.trend_series || []).map((t: TrendDataPoint) => ({
     期间: t.period,
-    毛利额: t.gross_profit || 0,
+    毛利额: dataCaliber.value === 'yoy'
+      ? (t.gross_profit_yoy_growth || 0)
+      : dataCaliber.value === 'mom'
+        ? (t.gross_profit_mom_growth || 0)
+        : (t.gross_profit || 0),
   }))
 );
 
@@ -197,7 +193,7 @@ const profitTrendData = computed(() =>
 const marginTrendData = computed(() =>
   (metricsData.value?.trend_series || []).map((t: TrendDataPoint) => ({
     期间: t.period,
-    毛利率: t.gross_margin || 0,
+    gross_margin: t.gross_margin || 0,
   }))
 );
 
@@ -205,28 +201,99 @@ const marginTrendData = computed(() =>
 const monthlyRevenueData = computed(() =>
   (metricsData.value?.trend_series || []).map((t: TrendDataPoint) => ({
     月份: t.period,
-    收入: t.revenue || 0,
+    收入: toWan(t.revenue),
   }))
 );
+
+// KPI trend values from latest trend_series point
+const orderCountTrend = computed(() => {
+  const ts = metricsData.value?.trend_series || [];
+  if (!ts.length) return undefined;
+  const latest = ts[ts.length - 1];
+  const key = compareBase.value === 'mom' ? 'order_count_mom_growth' as const : 'order_count_yoy_growth' as const;
+  return latest[key] ?? undefined;
+});
+
+const grossMarginTrend = computed(() => {
+  const ts = metricsData.value?.trend_series || [];
+  if (!ts.length) return undefined;
+  const latest = ts[ts.length - 1];
+  const key = compareBase.value === 'mom' ? 'gross_margin_mom_growth' as const : 'gross_margin_yoy_growth' as const;
+  return latest[key] ?? undefined;
+});
+
+// Multi-dimension: pivot per-entity trend data into multi-series format
+function pivotMulti(seriesMap: Map<string, TrendDataPoint[]>, field: string, toWanFlag = true): Record<string, unknown>[] {
+  const dimValues = [...seriesMap.keys()];
+  if (!dimValues.length) return [];
+  const periods = [...new Set([...seriesMap.values()].flatMap((arr) => arr.map((t) => t.period)))].sort();
+  return periods.map((period) => {
+    const point: Record<string, unknown> = { 期间: period };
+    dimValues.forEach((dim) => {
+      const tp = (seriesMap.get(dim) || []).find((t) => t.period === period);
+      const raw = tp?.[field as keyof TrendDataPoint] ?? 0;
+      point[dim] = toWanFlag ? toWan(raw as number) : raw;
+    });
+    return point;
+  });
+}
+
+const multiRevenueData = computed(() => pivotMulti(perEntityTrends.value, 'revenue', true));
+const multiProfitData = computed(() => pivotMulti(perEntityTrends.value, 'gross_profit', true));
+const multiMarginData = computed(() => pivotMulti(perEntityTrends.value, 'gross_margin', false));
+
+// Fetch per-entity trend series for multi-line display
+async function fetchPerEntityTrends() {
+  perEntityTrends.value = new Map();
+  const dimData = metricsData.value?.dimension_trend_series || [];
+  const dimValues = [...new Set(dimData.map((d) => d.dimension_value))].filter((d) => d != null && d !== undefined && d !== 'company');
+  if (!isMultiDim.value || !dimValues.length) return;
+
+  const promises = dimValues.map((dim) => {
+    const filterParam = trendDimension.value === 'department' ? 'department' : 'product';
+    return getCoreMetrics({
+      period: period.value,
+      dimension: trendDimension.value,
+      [filterParam]: dim,
+      period_dimension: periodDimension.value,
+      compare: compareBase.value,
+    }).then((axiosResp) => ({
+      dimValue: dim,
+      series: ((axiosResp.data.data as CoreMetricsResponse)?.trend_series || []),
+    }));
+  });
+  const results = await Promise.allSettled(promises);
+  const map = new Map<string, TrendDataPoint[]>();
+  results.forEach((r) => {
+    if (r.status === 'fulfilled') {
+      map.set(r.value.dimValue, r.value.series);
+    }
+  });
+  perEntityTrends.value = map;
+}
 
 const assistantContext = computed(() => ({
   period: period.value,
   dimension: trendDimension.value,
   entity: selectedEntity.value,
-  period_compare_type: 'yoy',
+  period_dimension: periodDimension.value,
+  period_compare_type: compareBase.value,
   active_section: 'trend',
 }));
 
 async function fetchMetrics() {
   loading.value = true;
   try {
+    const filterParam = trendDimension.value === 'department' ? 'department' : trendDimension.value === 'product_line' ? 'product' : null;
     const { data: resp } = await getCoreMetrics({
       period: period.value,
       dimension: trendDimension.value,
-      entity: trendDimension.value !== 'company' ? selectedEntity.value : undefined,
+      [filterParam || 'entity']: filterParam && selectedEntity.value ? selectedEntity.value : undefined,
       period_dimension: periodDimension.value,
+      compare: compareBase.value,
     });
     metricsData.value = resp.data as CoreMetricsResponse;
+    await fetchPerEntityTrends();
   } finally {
     loading.value = false;
   }
@@ -237,7 +304,7 @@ async function fetchOptions() {
   const periods = ((periodResp.data as any)?.options || []) as string[];
   allPeriods.value = periods;
   if (!selectedPeriod.value && periods.length) {
-    selectedPeriod.value = periods[periods.length - 1];
+    selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
   }
 }
 
@@ -260,6 +327,7 @@ watch([periodDimension, selectedPeriod, trendDimension], async () => {
   fetchMetrics();
 });
 watch(selectedEntity, refresh);
+watch(compareBase, refresh);
 
 onMounted(async () => { await fetchOptions(); await fetchMetrics(); });
 </script>

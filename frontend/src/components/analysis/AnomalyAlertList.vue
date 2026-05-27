@@ -6,7 +6,7 @@
           <a-list-item>
             <a-alert :type="item.sigma_distance > 3 ? 'error' : item.sigma_distance > 2 ? 'warning' : 'info'"
               :message="`${item.metric_name} - ${item.entity || '未知'}`"
-              :description="`期间: ${item.period} | 实际值: ${item.value.toFixed(2)} | 期望均值: ${item.expected_mean.toFixed(2)} | 偏离: ${item.sigma_distance.toFixed(1)}σ`"
+              :description="`期间: ${item.period} | 实际值: ${(item.value ?? 0).toFixed(2)} | 期望均值: ${(item.expected_mean ?? 0).toFixed(2)} | 偏离: ${(item.sigma_distance ?? 0).toFixed(1)}σ`"
               show-icon class="anomaly-alert" />
           </a-list-item>
         </template>
