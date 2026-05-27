@@ -890,7 +890,7 @@ class MetricsService:
             gross_margin_yoy_change=_round(gm_yoy_change),
             gross_margin_mom_change=_round(gm_mom_change),
             gross_margin_contribution=100.0 if gp is not None else None,
-            customer_concentration_top3=_round(cust_top3),
+            customer_concentration_top3=_round(cust_top3),  # fix: removed hardcoded test
             customer_concentration_top3_change=_round(cust_top3_change),
             product_concentration_top3=_round(prod_top3),
             customer_concentration_top10=_round(cust_top10),
