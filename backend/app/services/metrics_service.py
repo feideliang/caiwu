@@ -213,6 +213,14 @@ class MetricsService:
         if department:
             bgbu_filter = department
 
+        # ── Map entity parameter to dimension-specific params ──
+        # Frontend uses 'entity' generically; backend needs dimension-specific param names
+        if entity and not product and not customer:
+            if dimension == 'product_line':
+                product = entity
+            elif dimension == 'customer':
+                customer = entity
+
         # ── Cache check: data updates once per day, cache 24h ──
         _sections_key = ",".join(sorted(sections)) if sections else "all"
         _cache_key = f"metrics:core:v2:{period}:{dimension}:{compare}:{period_dimension}:{product}:{department}:{customer}:{bgbu_filter}:{_sections_key}"
@@ -234,6 +242,10 @@ class MetricsService:
             current_period = f"{period_start or ''}~{period_end or ''}" if period_start and period_end else None
         else:
             current_period = period or latest_period
+            # For cumulative: if period is year-only (e.g. "2026"), resolve to latest month of that year
+            if period_dimension == "cumulative" and current_period and len(current_period) == 4 and current_period.isdigit():
+                year_months = [p for p in sorted_periods if p.startswith(f"{current_period}-")]
+                current_period = year_months[-1] if year_months else None
 
         warnings: list[str] = []
         if not current_period:

@@ -1306,6 +1306,14 @@ async def ai_chat_stream(
     if rules_text:
         prompt = f"{prompt}\n\n{rules_text}"
 
+    # If Qwen API key is not configured, return rule-based answer via SSE instead of hanging
+    if not settings.qwen_api_key:
+        result = _generate_rule_based_answer(body.question, kpis, dept_items, prod_items, body.context)
+        result["suggestions"] = _get_page_suggestions(kpis, dept_items, prod_items, body.context.active_section if body.context else "", customer_items=customer_items_stream)
+        async def gen_fallback():
+            yield f"data: {{\"answer\": {json.dumps(result['answer'], ensure_ascii=False)}, \"suggestions\": {json.dumps(result['suggestions'], ensure_ascii=False)}, \"references\": {json.dumps(result['references'], ensure_ascii=False)}, \"done\": true}}\n\n"
+        return StreamingResponse(gen_fallback(), media_type="text/event-stream")
+
     # Use model from request if provided, otherwise default from settings
     model = getattr(body, 'model', None) or settings.qwen_model
 

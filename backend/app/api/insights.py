@@ -107,7 +107,11 @@ async def list_insights(
                 if key in status_lookup:
                     item["status"] = status_lookup[key]
 
-        # Apply filters
+        # Apply dimension filter
+        if dimension and dimension != "company":
+            rule_items = [i for i in rule_items if (i.get("data_json") or {}).get("dimension") == dimension]
+
+        # Apply type and status filters
         if insight_type:
             rule_items = [i for i in rule_items if i.get("type") == insight_type]
         if status:
