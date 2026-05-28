@@ -1276,28 +1276,42 @@ class MetricsService:
                         "gross_margin": _round(t_gm),
                     })
 
-        def _count_consecutive(trend_list, field_name: str) -> int:
-            """Count the length of the most recent consecutive growth streak."""
-            n = len(trend_list)
-            last_positive_idx = -1
-            for i in range(n - 1, -1, -1):
-                val = getattr(trend_list[i], field_name)
-                if val is not None and val > 0:
-                    last_positive_idx = i
-                    break
-            if last_positive_idx == -1:
+        def _count_consecutive_in_range(periods: list[str], metric_key: str) -> int:
+            """Count consecutive MoM growth streak within the selected period range.
+
+            Only counts where both the current and comparison periods are within
+            the selected range (e.g., for cumulative YTD, only counts months
+            within that year, not cross-year transitions).
+            """
+            if len(periods) < 2:
                 return 0
-            streak = 1
-            for i in range(last_positive_idx - 1, -1, -1):
-                val = getattr(trend_list[i], field_name)
-                if val is not None and val > 0:
+            sorted_ps = sorted(periods)
+            # Build (period, value) from period_bucket
+            values: list[tuple[str, float]] = []
+            for p in sorted_ps:
+                bk = period_bucket.get(p, {})
+                val = bk.get(metric_key)
+                if val is not None:
+                    values.append((p, val))
+            if len(values) < 2:
+                return 0
+            # Compute MoM changes for adjacent pairs within range
+            mom_changes: list[bool] = []
+            for i in range(1, len(values)):
+                prev_val = values[i - 1][1]
+                curr_val = values[i][1]
+                mom_changes.append(curr_val > prev_val if prev_val else False)
+            # Count streak from latest backwards
+            streak = 0
+            for i in range(len(mom_changes) - 1, -1, -1):
+                if mom_changes[i]:
                     streak += 1
                 else:
                     break
             return streak
 
-        summary.revenue_consecutive_growth = _count_consecutive(trend, 'revenue_mom_growth')
-        summary.gross_profit_consecutive_growth = _count_consecutive(trend, 'gross_profit_mom_growth')
+        summary.revenue_consecutive_growth = _count_consecutive_in_range(current_members, 'revenue')
+        summary.gross_profit_consecutive_growth = _count_consecutive_in_range(current_members, 'gross_profit')
 
         gm_values = [pt.gross_margin for pt in trend if pt.gross_margin is not None]
         if len(gm_values) >= 2:
