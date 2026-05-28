@@ -202,6 +202,11 @@ const chartOption = computed<EChartsOption | null>(() => {
   if (!prediction.value) return null;
   const p = prediction.value;
 
+  const isAmount = p.metric_name === 'revenue' || p.metric_name === 'gross_profit';
+  const unitLabel = isAmount ? '万元' : '';
+  const metricDisplay: Record<string, string> = { revenue: '营业收入', gross_profit: '毛利润' };
+  const yLabel = isAmount ? `${metricDisplay[p.metric_name] || p.metric_name}(万元)` : undefined;
+
   // Handle new backend response format (forecast_values + confidence_band)
   let dates: string[] = [];
   let actualValues: (number | null)[] = [];
@@ -244,8 +249,14 @@ const chartOption = computed<EChartsOption | null>(() => {
     return null;
   }
 
+  // Convert to 万元 for amount metrics
+  const actualDisplay = isAmount ? actualValues.map((v) => (v !== null ? v / 10000 : null)) : actualValues;
+  const forecastDisplay = isAmount ? forecastValues.map((v) => (v !== null ? v / 10000 : null)) : forecastValues;
+  const upperDisplay = isAmount ? upper.map((v) => v / 10000) : upper;
+  const lowerDisplay = isAmount ? lower.map((v) => v / 10000) : lower;
+
   // Build stacked area for confidence band (upper - lower)
-  const bandUpper = upper.map((u, i) => u - lower[i]);
+  const bandUpper = upperDisplay.map((u, i) => u - lowerDisplay[i]);
 
   return {
     tooltip: {
@@ -253,7 +264,10 @@ const chartOption = computed<EChartsOption | null>(() => {
       formatter: ((params: Array<{ seriesName: string; value: number; dataIndex: number }>) => {
         if (!Array.isArray(params) || params.length === 0) return '';
         const date = dates[params[0].dataIndex];
-        const lines = params.map((p) => `${p.seriesName}: ${p.value?.toFixed(2) ?? '-'}`).join('<br/>');
+        const lines = params.map((p) => {
+          const val = p.value != null ? p.value.toFixed(2) : '-';
+          return `${p.seriesName}: ${val}${unitLabel}`;
+        }).join('<br/>');
         return `${date}<br/>${lines}`;
       }) as any,
     },
@@ -274,6 +288,10 @@ const chartOption = computed<EChartsOption | null>(() => {
     },
     yAxis: {
       type: 'value',
+      name: yLabel,
+      axisLabel: {
+        formatter: (value: number) => value.toLocaleString(),
+      },
     },
     series: [
       // Confidence band (stacked area)
@@ -281,7 +299,7 @@ const chartOption = computed<EChartsOption | null>(() => {
         name: '置信区间',
         type: 'line',
         stack: 'confidence',
-        data: lower,
+        data: lowerDisplay,
         lineStyle: { opacity: 0 },
         symbol: 'none',
         areaStyle: { color: 'rgba(22, 119, 255, 0.15)' },
@@ -301,7 +319,7 @@ const chartOption = computed<EChartsOption | null>(() => {
       {
         name: '历史值',
         type: 'line',
-        data: actualValues,
+        data: actualDisplay,
         lineStyle: { width: 2, color: '#1677ff' },
         itemStyle: { color: '#1677ff' },
         z: 2,
@@ -310,7 +328,7 @@ const chartOption = computed<EChartsOption | null>(() => {
       {
         name: '预测值',
         type: 'line',
-        data: forecastValues,
+        data: forecastDisplay,
         lineStyle: { width: 2, color: '#faad14', type: 'dashed' },
         itemStyle: { color: '#faad14' },
         z: 2,

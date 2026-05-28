@@ -189,7 +189,7 @@ async def get_insight(
 @router.post("/{insight_id}/status", response_model=APIResponse)
 @audit_action(resource_type="insight", action="update_insight_status", extract_resource_id=lambda kw, res: kw.get("insight_id"))
 async def update_insight_status(
-    insight_id: int,
+    insight_id: str,
     body: InsightStatusUpdate,
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_user),
@@ -197,8 +197,16 @@ async def update_insight_status(
     """Update insight status: read / process / ignore.
 
     Status is stored in the data_json column under '__status' key.
+    Rule-generated insights (string IDs like 'rule:...') are ephemeral and
+    don't need DB persistence — return success immediately.
     """
-    row = await db.get(Insight, insight_id)
+    # Rule-generated insights have string IDs — no DB row to update
+    try:
+        int_id = int(insight_id)
+    except (ValueError, TypeError):
+        return APIResponse.success(data={"id": insight_id, "status": body.status})
+
+    row = await db.get(Insight, int_id)
     if row is None:
         raise ResourceNotFoundError(f"Insight {insight_id} not found")
 

@@ -317,7 +317,7 @@ const assistantContext = computed(() => ({
   active_section: 'customer',
 }));
 
-const recommendations = ref<AnalysisRecommendations | null>(null);
+const recommendations = ref<AnalysisRecommendations>();
 
 async function loadRecommendations() {
   try {
@@ -326,7 +326,7 @@ async function loadRecommendations() {
       period: period.value,
       period_compare_type: compareBase.value,
     });
-    recommendations.value = data.data || null;
+    recommendations.value = data.data?.data || undefined;
   } catch { /* non-critical */ }
 }
 

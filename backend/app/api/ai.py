@@ -910,13 +910,38 @@ async def ai_chat(
         department=ctx.department if ctx else None,
         product=ctx.product if ctx else None,
     )
-    # Skip expensive breakdown query — prompt only needs summary KPIs + RAG rules
+
+    # Fetch department and product breakdowns for chat prompt
     dept_items, prod_items = [], []
+    active_section = body.context.active_section if body.context else ""
+    page_type_hint = body.context.page_type if hasattr(body.context, 'page_type') and body.context.page_type else ""
+    if active_section not in ("customer",):
+        from app.db.session import async_session_factory
+        from app.services.metrics_service import MetricsService
+        async with async_session_factory() as session:
+            dept_r = await MetricsService.get_core_metrics(
+                db=session,
+                period=body.context.period if body.context else None,
+                dimension="department",
+                compare="mom",
+                period_dimension=body.context.period_dimension if body.context else "monthly",
+                bgbu_filter="ALL",
+                sections={"breakdowns"},
+            )
+            dept_items = [b.model_dump() for b in (dept_r.breakdowns or [])]
+            prod_r = await MetricsService.get_core_metrics(
+                db=session,
+                period=body.context.period if body.context else None,
+                dimension="product_line",
+                compare="mom",
+                period_dimension=body.context.period_dimension if body.context else "monthly",
+                bgbu_filter="ALL",
+                sections={"breakdowns"},
+            )
+            prod_items = [b.model_dump() for b in (prod_r.breakdowns or [])]
 
     # Fetch customer breakdown for customer-focused pages
     customer_items = []
-    active_section = body.context.active_section if body.context else ""
-    page_type_hint = body.context.page_type if hasattr(body.context, 'page_type') and body.context.page_type else ""
     if active_section in ("customer", "overview") or page_type_hint == "customer":
         from app.db.session import async_session_factory
         from app.services.metrics_service import MetricsService
@@ -1004,8 +1029,10 @@ async def ai_chat(
                     data_lines.append("部门: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in dept_items[:5]))
                 if prod_items:
                     data_lines.append("产品: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in prod_items[:5]))
+                if customer_items:
+                    data_lines.append("客户: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in customer_items[:5]))
                 data_section = "当前数据: " + "。".join(data_lines) + "。"
-                data_section += "\n注意：请基于以上数据进行分析，不要编造数据。如果数据充分请给出具体分析，如果数据不足请说明具体缺少哪些维度的数据，避免笼统地说'无明细数据'。"
+                data_section += "\n注意：请仅基于以上已有数据进行分析，不要编造或假设任何额外数据。如果用户的问题超出了已有数据的范围，直接回答已有数据能支持的部分，不要列出'缺少哪些数据'。"
 
                 system_role = (
                     f"你是财务分析助手。基于以下数据和规则回答。\n\n"
@@ -1021,7 +1048,7 @@ async def ai_chat(
                 f"要求：\n"
                 f"1. 必须基于提供的数据和规则回答，不得编造\n"
                 f"2. 中文回答，简洁专业\n"
-                f"3. 数据不足时明确说明\n"
+                f"3. 直接回答用户问题，不要列出'缺少哪些数据'或'数据不足'的说明\n"
                 f"4. 使用中文数字标题分段（一、二、三…）\n"
                 f"5. 每个标题下按行列出指标，每行不超过15字，格式：指标名：数值\n"
                 f"6. 异常、原因、建议分别成段，不要把所有内容挤成一段\n"
@@ -1068,7 +1095,7 @@ def _is_financial_question(question: str) -> bool:
     ])
 
 
-def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_items: list) -> str:
+def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_items: list, customer_items: list | None = None) -> str:
     """Build a concise prompt for AI chat."""
     ctx = body.context
     context_note = ""
@@ -1114,8 +1141,10 @@ def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_ite
             data_lines.append("部门: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in dept_items[:5]))
         if prod_items:
             data_lines.append("产品: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in prod_items[:5]))
+        if customer_items:
+            data_lines.append("客户: " + ", ".join(f"{d['dimension_value']}收入{d.get('revenue') or 0:,.0f}毛利率{d.get('gross_margin') or 0:.2f}%" for d in customer_items[:5]))
         data_section = "当前数据: " + "。".join(data_lines) + "。"
-        data_section += "\n注意：请基于以上数据进行分析，不要编造数据。如果数据充分请给出具体分析，如果数据不足请说明具体缺少哪些维度的数据，避免笼统地说'无明细数据'。"
+        data_section += "\n注意：请仅基于以上已有数据进行分析，不要编造或假设任何额外数据。如果用户的问题超出了已有数据的范围，直接回答已有数据能支持的部分，不要列出'缺少哪些数据'。"
 
         system_role = (
             f"你是财务分析助手。基于以下数据和规则回答。\n\n"
@@ -1135,7 +1164,7 @@ def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_ite
         f"要求：\n"
         f"1. 必须基于提供的数据和规则回答，不得编造\n"
         f"2. 中文回答，简洁专业\n"
-        f"3. 数据不足时明确说明\n"
+        f"3. 直接回答用户问题，不要列出'缺少哪些数据'或'数据不足'的说明\n"
         f"4. 使用中文数字标题分段（一、二、三…）\n"
         f"5. 每个标题下按行列出指标，每行不超过15字，格式：指标名：数值\n"
         f"6. 异常、原因、建议分别成段，不要把所有内容挤成一段\n"
@@ -1225,28 +1254,52 @@ async def ai_chat_stream(
         )
     else:
         kpis = {}
-    # Skip expensive breakdown query — prompt only needs summary KPIs + RAG rules
-    dept_items, prod_items = [], []
 
-    # Fetch customer breakdown for customer pages in streaming
+    # Fetch department and product breakdowns for chat prompt
+    dept_items, prod_items = [], []
     customer_items_stream = []
-    _stream_active = body.context.active_section if body.context else ""
-    if _stream_active in ("customer", "overview"):
+    if _is_financial_question(body.question):
         from app.db.session import async_session_factory
         from app.services.metrics_service import MetricsService
+        _stream_active = body.context.active_section if body.context else ""
         async with async_session_factory() as session:
-            cust_r = await MetricsService.get_core_metrics(
-                db=session,
-                period=body.context.period if body.context else None,
-                dimension="company",
-                compare="mom",
-                bgbu_filter="ALL",
-                sections={"customer_breakdown"},
-            )
-            customer_items_stream = [b.model_dump() for b in cust_r.customer_breakdown]
+            if _stream_active not in ("customer",):
+                # Fetch department breakdown
+                dept_r = await MetricsService.get_core_metrics(
+                    db=session,
+                    period=body.context.period if body.context else None,
+                    dimension="department",
+                    compare="mom",
+                    period_dimension=body.context.period_dimension if body.context else "monthly",
+                    bgbu_filter="ALL",
+                    sections={"breakdowns"},
+                )
+                dept_items = [b.model_dump() for b in (dept_r.breakdowns or [])]
+                # Fetch product breakdown
+                prod_r = await MetricsService.get_core_metrics(
+                    db=session,
+                    period=body.context.period if body.context else None,
+                    dimension="product_line",
+                    compare="mom",
+                    period_dimension=body.context.period_dimension if body.context else "monthly",
+                    bgbu_filter="ALL",
+                    sections={"breakdowns"},
+                )
+                prod_items = [b.model_dump() for b in (prod_r.breakdowns or [])]
+            # Fetch customer breakdown for customer/overview pages
+            if _stream_active in ("customer", "overview"):
+                cust_r = await MetricsService.get_core_metrics(
+                    db=session,
+                    period=body.context.period if body.context else None,
+                    dimension="company",
+                    compare="mom",
+                    bgbu_filter="ALL",
+                    sections={"customer_breakdown"},
+                )
+                customer_items_stream = [b.model_dump() for b in cust_r.customer_breakdown]
 
     # Build prompt with RAG rules
-    prompt = _build_chat_prompt(body, kpis, dept_items, prod_items)
+    prompt = _build_chat_prompt(body, kpis, dept_items, prod_items, customer_items_stream)
 
     # Prepend rules via RAG
     rules_text = await _get_rules_for_question(body.question)

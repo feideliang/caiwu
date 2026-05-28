@@ -37,7 +37,7 @@
     </div>
 
     <!-- Analysis Recommendations -->
-    <div v-if="recommendations && messages.length === 0" class="recommendations">
+    <div v-if="recommendations" class="recommendations">
       <div v-if="recommendations.summary" class="rec-summary">
         {{ recommendations.summary }}
       </div>
@@ -47,10 +47,12 @@
         <div
           v-for="(alert, idx) in recommendations.anomalies"
           :key="idx"
-          :class="['rec-alert', alert.severity]"
+          :class="['rec-alert', alert.severity, 'clickable']"
+          @click="askQuestion(alert.message)"
         >
           <span class="alert-icon">{{ alert.severity === 'high' ? '🔴' : alert.severity === 'medium' ? '🟡' : '🔵' }}</span>
           <span class="alert-message">{{ alert.message }}</span>
+          <span class="alert-action">点击分析</span>
         </div>
       </div>
 
@@ -59,8 +61,9 @@
         <div
           v-for="(m, idx) in recommendations.metrics"
           :key="idx"
-          class="rec-metric"
+          class="rec-metric clickable"
           :class="m.status"
+          @click="askQuestion(`为什么${m.metric_name}${m.status === 'warning' ? '预警' : m.status === 'critical' ? '严重异常' : '正常'}`)"
         >
           <span class="metric-name">{{ m.metric_name }}</span>
           <span class="metric-value" v-if="m.current_value !== undefined">
@@ -73,14 +76,21 @@
       <!-- Drill-down path -->
       <div v-if="recommendations.drill_down_path && recommendations.drill_down_path.length" class="rec-drilldown">
         <span class="drilldown-label">建议下钻：</span>
-        <a-tag v-for="(p, idx) in recommendations.drill_down_path" :key="idx" size="small" color="geekblue">
+        <a-tag
+          v-for="(p, idx) in recommendations.drill_down_path"
+          :key="idx"
+          size="small"
+          color="geekblue"
+          class="drill-tag-clickable"
+          @click="askQuestion(`请分析${p}的详细情况`)"
+        >
           {{ p }}
         </a-tag>
       </div>
     </div>
 
     <!-- Suggestions -->
-    <div v-if="suggestions.length > 0 && messages.length === 0" class="suggestions">
+    <div v-if="suggestions.length > 0" class="suggestions">
       <a-button
         v-for="(s, idx) in suggestions"
         :key="idx"
@@ -134,7 +144,7 @@ const props = defineProps<{
     suggested_questions: string[];
     summary: string;
     drill_down_path?: string[];
-  };
+  } | undefined;
 }>();
 
 const messages = ref<DisplayMessage[]>([]);
@@ -501,10 +511,25 @@ watch(messages, async () => {
     border: 1px solid #91caff;
     color: #0958d9;
   }
+
+  &.clickable {
+    cursor: pointer;
+    transition: all 0.2s;
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+  }
 }
 
 .alert-message {
   flex: 1;
+}
+
+.alert-action {
+  font-size: 11px;
+  opacity: 0.5;
+  margin-left: 4px;
 }
 
 .rec-metrics {
@@ -536,6 +561,15 @@ watch(messages, async () => {
     background: #f6ffed;
     border: 1px solid #b7eb8f;
   }
+
+  &.clickable {
+    cursor: pointer;
+    transition: all 0.2s;
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+  }
 }
 
 .metric-name {
@@ -566,5 +600,14 @@ watch(messages, async () => {
 .drilldown-label {
   font-size: 12px;
   color: #999;
+}
+
+.drill-tag-clickable {
+  cursor: pointer;
+  transition: all 0.2s;
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  }
 }
 </style>

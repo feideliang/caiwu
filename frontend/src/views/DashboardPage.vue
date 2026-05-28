@@ -130,7 +130,7 @@ const assistantContext = computed(() => ({
   active_section: 'overview' as string,
 }));
 
-const recommendations = ref<AnalysisRecommendations | null>(null);
+const recommendations = ref<AnalysisRecommendations>();
 
 async function loadRecommendations() {
   try {
@@ -141,7 +141,7 @@ async function loadRecommendations() {
       department: selectedMarketLine.value,
       product: selectedProduct.value,
     });
-    recommendations.value = data.data || null;
+    recommendations.value = data.data?.data || undefined;
   } catch { /* non-critical */ }
 }
 
