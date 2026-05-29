@@ -171,6 +171,9 @@
             :pagination="{ pageSize: 10 }"
             :scroll="{ x: 1200 }"
           >
+            <template #headerCell="{ column }">
+              <a-tooltip v-if="(column as any).tooltip" :title="(column as any).tooltip">{{ (column as any).title }}</a-tooltip>
+            </template>
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'category'">
                 {{ categoryLabel((record as any).category) }}
@@ -458,6 +461,15 @@ const marginChangeValue = computed(() => {
   return curr - base;
 });
 
+const columnTooltips: Record<string, string> = {
+  current_margin: '当期该维度值的毛利率 = 毛利额 / 收入 × 100%',
+  base_margin: '基期该维度值的毛利率 = 基期毛利额 / 基期收入 × 100%',
+  margin_change: '毛利率变化 = 当期毛利率 - 基期毛利率（单位：pp）',
+  structure_impact: '结构影响 = (当期收入占比 - 基期收入占比) × (存续毛利率 - 基期整体毛利率)',
+  margin_impact: '毛利影响 = 基期收入占比 × (当期毛利率 - 基期毛利率)',
+  total_impact: '总影响 = 结构影响 + 毛利影响（反映该维度对整体毛利率变动的贡献）',
+};
+
 const marginAnalysisColumns = [
   { title: '分类', key: 'category', width: 100 },
   { title: '维度值', dataIndex: 'dimension_value', key: 'dimension_value', width: 180 },
@@ -466,12 +478,12 @@ const marginAnalysisColumns = [
   { title: '当期收入占比', dataIndex: 'current_share', key: 'current_share', width: 120 },
   { title: '基期收入占比', dataIndex: 'base_share', key: 'base_share', width: 120 },
   { title: '收入占比变化', dataIndex: 'share_change', key: 'share_change', width: 120 },
-  { title: '当期毛利率', dataIndex: 'current_margin', key: 'current_margin', width: 120 },
-  { title: '基期毛利率', dataIndex: 'base_margin', key: 'base_margin', width: 120 },
-  { title: '毛利率变化', dataIndex: 'margin_change', key: 'margin_change', width: 120 },
-  { title: '结构影响', dataIndex: 'structure_impact', key: 'structure_impact', width: 120 },
-  { title: '毛利影响', dataIndex: 'margin_impact', key: 'margin_impact', width: 120 },
-  { title: '总影响', dataIndex: 'total_impact', key: 'total_impact', width: 120 },
+  { title: '当期毛利率', dataIndex: 'current_margin', key: 'current_margin', width: 120, tooltip: columnTooltips.current_margin },
+  { title: '基期毛利率', dataIndex: 'base_margin', key: 'base_margin', width: 120, tooltip: columnTooltips.base_margin },
+  { title: '毛利率变化', dataIndex: 'margin_change', key: 'margin_change', width: 120, tooltip: columnTooltips.margin_change },
+  { title: '结构影响', dataIndex: 'structure_impact', key: 'structure_impact', width: 120, tooltip: columnTooltips.structure_impact },
+  { title: '毛利影响', dataIndex: 'margin_impact', key: 'margin_impact', width: 120, tooltip: columnTooltips.margin_impact },
+  { title: '总影响', dataIndex: 'total_impact', key: 'total_impact', width: 120, tooltip: columnTooltips.total_impact },
 ];
 
 function categoryLabel(category: string): string {
