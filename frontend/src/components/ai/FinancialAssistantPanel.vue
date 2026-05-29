@@ -158,6 +158,9 @@ const modelOptions = ref<Array<{ label: string; value: string }>>([]);
 
 // Fetch available models on mount
 onMounted(async () => {
+  // Clean up any stale overlays/modals
+  document.querySelectorAll('vite-error-overlay, .ant-modal-mask, [data-vite-dev-overlay]').forEach(el => (el as HTMLElement).remove());
+
   try {
     const { data: resp } = await getAIConfig();
     const cfg = resp.data as { current_model: string; available_models: Array<{ value: string; label: string }> };
@@ -350,16 +353,26 @@ watch(messages, async () => {
 .assistant-panel {
   display: flex;
   flex-direction: column;
+  max-height: calc(100vh - 140px);
+  overflow: hidden;
+
+  :deep(.ant-card-body) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 8px;
+  }
 }
 
 .messages {
-  min-height: 200px;
-  max-height: 400px;
+  min-height: 120px;
+  max-height: 350px;
   overflow-y: auto;
   padding: 8px 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .message {
@@ -455,6 +468,8 @@ watch(messages, async () => {
 }
 
 .suggestions {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -468,10 +483,14 @@ watch(messages, async () => {
 }
 
 .input-area {
+  position: relative;
+  z-index: 3;
   margin-top: 8px;
 }
 
 .recommendations {
+  position: relative;
+  z-index: 1;
   padding: 8px 0;
 }
 
@@ -479,9 +498,13 @@ watch(messages, async () => {
   font-size: 13px;
   color: #666;
   margin-bottom: 8px;
+  position: relative;
+  z-index: 1;
 }
 
 .rec-anomalies {
+  position: relative;
+  z-index: 2;
   margin-bottom: 8px;
 }
 
@@ -533,6 +556,8 @@ watch(messages, async () => {
 }
 
 .rec-metrics {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -591,6 +616,8 @@ watch(messages, async () => {
 }
 
 .rec-drilldown {
+  position: relative;
+  z-index: 2;
   margin-top: 8px;
   display: flex;
   align-items: center;
