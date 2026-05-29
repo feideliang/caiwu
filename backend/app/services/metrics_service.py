@@ -1331,7 +1331,12 @@ class MetricsService:
             prev_dim = _sum_nested_bucket_values(period_dim_bucket, compare_members)
             curr_dim = current_dim_buckets
             current_overall_margin = (gp / rev * 100) if (gp is not None and rev) else 0.0
-            base_overall_margin = (prev_gp / prev_rev * 100) if (prev_gp is not None and prev_rev) else 0.0
+            # Use compare period's overall margin (not MoM prev_gp/prev_rev)
+            if has_entity_filter:
+                cmp_rev, _, cmp_gp = _filtered_bucket_values(resolved_compare_period)
+            else:
+                cmp_rev, _, cmp_gp = _bucket_values(resolved_compare_period)
+            base_overall_margin = (cmp_gp / cmp_rev * 100) if (cmp_gp is not None and cmp_rev) else 0.0
             curr_total_rev = sum((bk.get("revenue", 0) or 0) for bk in curr_dim.values())
             prev_total_rev = sum((bk.get("revenue", 0) or 0) for bk in prev_dim.values())
             margin_analysis: list[MarginChangeItem] = []
@@ -1367,9 +1372,12 @@ class MetricsService:
 
                 share_change = c_share - p_share
                 gm_change = c_gm - p_gm
-                structure_impact = (c_share - p_share) * p_gm / 100 if p_gm is not None else 0.0
-                margin_impact = c_share * (c_gm - p_gm) / 100 if (c_gm is not None and p_gm is not None) else 0.0
-                total_impact = structure_impact + margin_impact
+                # 结构影响 = (当期毛利率 - 基期整体毛利率) × (当期收入占比 - 基期收入占比)
+                structure_impact = (c_gm - base_overall_margin) * (c_share - p_share) / 100
+                # 总影响 = 当期贡献度 - 基期贡献度 (保证求和 = 毛利率变化)
+                total_impact = c_share * c_gm / 100 - p_share * p_gm / 100
+                # 毛利影响 = 总影响 - 结构影响 (确保三项关系成立)
+                margin_impact = total_impact - structure_impact
 
                 if category == "continuing":
                     margin_summary.continuing_structure_impact = (margin_summary.continuing_structure_impact or 0) + structure_impact
@@ -1382,18 +1390,42 @@ class MetricsService:
                 margin_analysis.append(MarginChangeItem(
                     dimension_value=str(dim_val),
                     category=category,
-                    current_revenue=round(c_rev, 2),
-                    current_share=round(c_share, 2),
-                    current_margin=round(c_gm, 2),
-                    base_revenue=round(p_rev, 2),
-                    base_share=round(p_share, 2),
-                    base_margin=round(p_gm, 2),
-                    share_change=round(share_change, 2),
-                    margin_change=round(gm_change, 2),
-                    structure_impact=round(structure_impact, 4),
-                    margin_impact=round(margin_impact, 4),
-                    total_impact=round(total_impact, 4),
+                    current_revenue=_round(c_rev, 2),
+                    current_share=_round(c_share, 2),
+                    current_margin=_round(c_gm, 2),
+                    base_revenue=_round(p_rev, 2),
+                    base_share=_round(p_share, 2),
+                    base_margin=_round(p_gm, 2),
+                    share_change=_round(share_change, 2),
+                    margin_change=_round(gm_change, 2),
+                    structure_impact=_round(structure_impact, 4),
+                    margin_impact=_round(margin_impact, 4),
+                    total_impact=_round(total_impact, 4),
                 ))
+
+            # Adjust total_impact so that sum = overall margin change
+            # (needed because zero-revenue items use overall margin as proxy,
+            # causing the contribution sum to deviate from actual margin change)
+            overall_margin_delta = current_overall_margin - base_overall_margin
+            raw_total_sum = sum(item.total_impact or 0 for item in margin_analysis)
+            if abs(raw_total_sum) > 1e-9 and abs(overall_margin_delta - raw_total_sum) > 1e-6:
+                adj = overall_margin_delta / raw_total_sum
+                for item in margin_analysis:
+                    raw_total = item.total_impact or 0
+                    new_total = raw_total * adj
+                    new_struct = item.structure_impact or 0
+                    new_margin = new_total - new_struct
+                    item.total_impact = _round(new_total, 4)
+                    item.margin_impact = _round(new_margin, 4)
+                # Recompute summary from adjusted items
+                margin_summary.continuing_structure_impact = sum(
+                    i.structure_impact or 0 for i in margin_analysis if i.category == "continuing")
+                margin_summary.continuing_margin_impact = sum(
+                    i.margin_impact or 0 for i in margin_analysis if i.category == "continuing")
+                margin_summary.new_impact = sum(
+                    i.total_impact or 0 for i in margin_analysis if i.category == "new")
+                margin_summary.exit_impact = sum(
+                    i.total_impact or 0 for i in margin_analysis if i.category == "exit")
 
             margin_analysis.sort(key=lambda item: abs(item.total_impact or 0), reverse=True)
             summary.margin_change_analysis = margin_analysis

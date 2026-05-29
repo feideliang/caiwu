@@ -60,6 +60,8 @@
             <!-- Entity selector -->
             <a-select v-if="dimension !== 'company' && !(dimension === 'department' && authStore.isDeptRestricted)" v-model:value="selectedEntity" :options="entityOptions" style="width: 180px" placeholder="实体" allow-clear />
             <a-tag v-if="dimension === 'department' && authStore.isDeptRestricted" color="blue">{{ authStore.department }}</a-tag>
+            <!-- Show active department scope filter -->
+            <a-tag v-if="departmentScope && dimension !== 'department' && dimension !== 'company'" color="orange" closable @close="departmentScope = undefined">部门: {{ departmentScope }}</a-tag>
             <!-- Cross-dimension selector -->
             <a-select v-if="crossDimensionOptions.length" v-model:value="crossDimension" :options="crossDimensionOptions" style="width: 140px" placeholder="交叉维度" allow-clear />
             <a-button type="primary" @click="refresh">刷新</a-button>
@@ -88,12 +90,13 @@
             <a-col :span="6">
               <div class="impact-box">
                 <div class="impact-title">主要变动影响</div>
-                <div v-for="item in revenueTopImpacts" :key="item.name" class="impact-item">
+                <div v-for="item in revenueTopImpactPage" :key="item.name" class="impact-item">
                   <span class="impact-name">{{ item.name }}</span>
                   <span class="impact-value">{{ item.change >= 0 ? '+' : '' }}{{ item.change.toFixed(0) }}万</span>
                   <span class="impact-pct">影响度{{ item.pct }}%</span>
                 </div>
                 <div v-if="!revenueTopImpacts.length" class="impact-empty">暂无数据</div>
+                <a-pagination v-if="revenueImpactPageCount > 1" simple size="small" :total="revenueTopImpacts.length" :page-size="10" :current="revenueImpactPageNum" @change="revenueImpactPageNum = $event" class="impact-pager" />
               </div>
             </a-col>
           </a-row>
@@ -117,12 +120,13 @@
             <a-col :span="6">
               <div class="impact-box">
                 <div class="impact-title">主要变动影响</div>
-                <div v-for="item in profitTopImpacts" :key="item.name" class="impact-item">
+                <div v-for="item in profitTopImpactPage" :key="item.name" class="impact-item">
                   <span class="impact-name">{{ item.name }}</span>
                   <span class="impact-value">{{ item.change >= 0 ? '+' : '' }}{{ item.change.toFixed(0) }}万</span>
                   <span class="impact-pct">影响度{{ item.pct }}%</span>
                 </div>
                 <div v-if="!profitTopImpacts.length" class="impact-empty">暂无数据</div>
+                <a-pagination v-if="profitImpactPageCount > 1" simple size="small" :total="profitTopImpacts.length" :page-size="10" :current="profitImpactPageNum" @change="profitImpactPageNum = $event" class="impact-pager" />
               </div>
             </a-col>
           </a-row>
@@ -362,21 +366,20 @@ watch(compareBase, (val) => {
   }
 });
 
-// Reset cross-dimension when primary dimension or entity changes
-// Also track department scope when switching away from department dimension
+// Reset cross-dimension when primary dimension changes
 watch([dimension, selectedEntity], ([newDim, newEntity], [oldDim, oldEntity]) => {
   crossDimension.value = '';
-  // When dimension was 'department' and user had selected an entity, preserve it as scope
-  if (oldDim === 'department' && oldEntity) {
+  // Preserve department scope when leaving department dimension
+  if (oldDim === 'department' && newDim !== 'department' && oldEntity) {
     departmentScope.value = oldEntity;
   }
-  // Clear department scope when switching to company or when entity is cleared
-  if (newDim === 'company' || !newEntity) {
-    departmentScope.value = undefined;
-  }
-  // If switching TO department, update scope to the new selection
+  // Set department scope when entity selected on department dimension
   if (newDim === 'department' && newEntity) {
     departmentScope.value = newEntity;
+  }
+  // Clear when switching to company
+  if (newDim === 'company') {
+    departmentScope.value = undefined;
   }
 }, { immediate: false });
 
@@ -554,6 +557,30 @@ const profitTopImpacts = computed(() => {
   return computeTopImpacts(breakdowns, baseBreakdowns, currTotal, baseTotal, 'gross_profit');
 });
 
+// Pagination for impact lists
+const IMPACT_PAGE_SIZE = 10;
+const revenueImpactPageNum = ref(1);
+const profitImpactPageNum = ref(1);
+
+// Reset page on dimension/entity change
+watch([dimension, selectedEntity], () => {
+  revenueImpactPageNum.value = 1;
+  profitImpactPageNum.value = 1;
+});
+
+const revenueImpactPageCount = computed(() => Math.ceil((revenueTopImpacts.value.length || 0) / IMPACT_PAGE_SIZE));
+const profitImpactPageCount = computed(() => Math.ceil((profitTopImpacts.value.length || 0) / IMPACT_PAGE_SIZE));
+
+const revenueTopImpactPage = computed(() => {
+  const s = (revenueImpactPageNum.value - 1) * IMPACT_PAGE_SIZE;
+  return revenueTopImpacts.value.slice(s, s + IMPACT_PAGE_SIZE);
+});
+
+const profitTopImpactPage = computed(() => {
+  const s = (profitImpactPageNum.value - 1) * IMPACT_PAGE_SIZE;
+  return profitTopImpacts.value.slice(s, s + IMPACT_PAGE_SIZE);
+});
+
 const assistantContext = computed(() => ({
   period: period.value,
   dimension: dimension.value,
@@ -578,18 +605,18 @@ async function loadRecommendations() {
 
 async function fetchMetrics() {
   basePeriodData.value = null;
-  fetchKey++;
   const key = fetchKey;
   loading.value = true;
   try {
-    // Pass department scope when viewing non-department dimensions
-    // (e.g., user selected 部门=CBG, then switched to 客户 — still scope to CBG)
-    // Do NOT pass department when dimension=department — entity handles that filter
-    const deptParam = dimension.value !== 'department' ? departmentScope.value : undefined;
+    // Pass department scope for filtering:
+    // departmentScope always holds the current department filter (set by watch1 when entity selected)
+    const deptParam = departmentScope.value;
+    const effectiveDim = crossDimension.value || dimension.value;
+    const entityParam = effectiveDim !== 'company' && !crossDimension.value ? selectedEntity.value : undefined;
     const { data: resp } = await getCoreMetrics({
       period: period.value,
-      dimension: dimension.value,
-      entity: dimension.value !== 'company' ? selectedEntity.value : undefined,
+      dimension: effectiveDim,
+      entity: entityParam,
       department: deptParam,
       period_dimension: periodDimension.value,
       compare: compareBase.value,
@@ -607,8 +634,8 @@ async function fetchMetrics() {
       const isCustomCompareRange = compareBase.value === 'custom_compare' && periodDimension.value === 'custom';
       const { data: baseResp } = await getCoreMetrics({
         period: isCustomCompareRange ? undefined : basePeriodVal,
-        dimension: dimension.value,
-        entity: dimension.value !== 'company' ? selectedEntity.value : undefined,
+        dimension: effectiveDim,
+        entity: entityParam,
         department: deptParam,
         period_dimension: periodDimension.value,
         compare: 'all',
@@ -643,27 +670,42 @@ async function loadEntityOptions() {
     selectedEntity.value = undefined;
     return;
   }
-  const { data: resp } = await getFilterOptions({ dimension: dimension.value });
+  const params: Record<string, unknown> = { dimension: dimension.value };
+  // Filter entity options by current department scope
+  if (departmentScope.value) {
+    params.department = departmentScope.value;
+  }
+  const { data: resp } = await getFilterOptions(params);
   const opts = ((resp.data as any)?.options || []) as string[];
   entityOptions.value = opts.map((v) => ({ label: v, value: v }));
   selectedEntity.value = undefined;
 }
 
-function refresh() { fetchMetrics(); }
+function refresh() { fetchKey++; fetchMetrics(); }
 
 let _oldDim: string | undefined;
 let _oldCompare: string | undefined;
-watch([periodDimension, selectedPeriod, dimension, periodStart, periodEnd, selectedEntity, compareBase, comparePeriod, comparePeriodStart, comparePeriodEnd], async ([, newSP, newDim, , , , newCompare]) => {
-  // Skip if called before options loaded (selectedPeriod still undefined on first tick)
+watch([periodDimension, selectedPeriod, dimension, periodStart, periodEnd, selectedEntity, compareBase, comparePeriod, comparePeriodStart, comparePeriodEnd, crossDimension], async ([, newSP, newDim, , , , newCompare]) => {
   if (!newSP) return;
   if (_oldDim !== newDim || _oldCompare !== newCompare) {
     await loadEntityOptions();
     _oldDim = newDim;
     _oldCompare = newCompare;
   }
+  fetchKey++;
   fetchMetrics();
   loadRecommendations();
 }, { immediate: true });
+
+// Department scope cleared externally (e.g., user closes orange tag) → refetch
+watch(departmentScope, (newVal, oldVal) => {
+  if (!selectedPeriod.value) return;
+  if (newVal === undefined && oldVal !== undefined) {
+    fetchKey++;
+    fetchMetrics();
+    loadRecommendations();
+  }
+});
 
 onMounted(async () => { await fetchOptions(); loadRecommendations(); });
 </script>
@@ -745,6 +787,9 @@ onMounted(async () => { await fetchOptions(); loadRecommendations(); });
   .impact-empty {
     font-size: 13px;
     color: var(--color-text-secondary);
+  }
+  .impact-pager {
+    margin-top: 8px;
   }
 }
 

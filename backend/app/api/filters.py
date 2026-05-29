@@ -47,6 +47,7 @@ def _normalize_view_filters(filters: dict | None) -> tuple[list[dict], str]:
 async def get_filter_options(
     dimension: str | None = Query(None, description="Dimension: period / entity / metric_name / department / product / product_line / customer"),
     prefix: str | None = Query(None, description="Optional prefix filter"),
+    department: str | None = Query(None, description="Filter by department (bgbu)"),
     db: AsyncSession = Depends(get_db),
     user: TokenPayload = Depends(get_current_user),
 ) -> APIResponse:
@@ -82,7 +83,7 @@ async def get_filter_options(
             # entity: return all distinct dim_value from agg_dimension_summary (no dim_type filter)
             # Note: this returns mixed values (products, customers, contract types)
             if dimension == "entity":
-                bgbu = (user.department if (user.role != "admin" and user.department) else "ALL")
+                bgbu = department if department else (user.department if (user.role != "admin" and user.department) else "ALL")
                 stmt = (
                     select(AggDimensionSummary.dim_value)
                     .where(AggDimensionSummary.bgbu == bgbu)
@@ -110,7 +111,7 @@ async def get_filter_options(
                 "product": "product_line",
                 "customer": "customer",
             }
-            bgbu = (user.department if (user.role != "admin" and user.department) else "ALL")
+            bgbu = department if department else (user.department if (user.role != "admin" and user.department) else "ALL")
 
             if dimension == "department":
                 # Read bgbu values from period_summary
