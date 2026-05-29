@@ -353,26 +353,16 @@ watch(messages, async () => {
 .assistant-panel {
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 140px);
-  overflow: hidden;
-
-  :deep(.ant-card-body) {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    padding-bottom: 8px;
-  }
 }
 
 .messages {
-  min-height: 120px;
-  max-height: 350px;
+  min-height: 200px;
+  max-height: 400px;
   overflow-y: auto;
   padding: 8px 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  flex-shrink: 0;
 }
 
 .message {

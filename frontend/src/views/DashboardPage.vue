@@ -141,7 +141,7 @@ async function loadRecommendations() {
       department: selectedMarketLine.value,
       product: selectedProduct.value,
     });
-    recommendations.value = data.data?.data || undefined;
+    recommendations.value = data.data || undefined;
   } catch { /* non-critical */ }
 }
 

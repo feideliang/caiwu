@@ -359,7 +359,7 @@ async function loadRecommendations() {
       period_compare_type: compareBase.value,
       product: drillMode.value ? drillProduct.value : selectedProduct.value,
     });
-    recommendations.value = data.data?.data || undefined;
+    recommendations.value = data.data || undefined;
   } catch { /* non-critical */ }
 }
 

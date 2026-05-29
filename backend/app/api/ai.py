@@ -889,9 +889,11 @@ async def ai_chat(
     """
     # Handle __init__ or empty/whitespace request FIRST — no DB queries needed
     if not body.question or not body.question.strip() or body.question.strip() == "__init__":
+        _init_active = body.context.active_section if body.context else ""
+        _init_suggestions = _get_page_suggestions({}, [], [], _init_active, page_type=_init_active or "dashboard")
         return APIResponse.success(data={
             "answer": "",
-            "suggestions": ["本月收入与毛利概况", "收入同比分析", "部门收入拆解"],
+            "suggestions": _init_suggestions,
             "references": [],
         })
 
@@ -1165,9 +1167,7 @@ def _build_chat_prompt(body: ChatRequest, kpis: dict, dept_items: list, prod_ite
         f"1. 必须基于提供的数据和规则回答，不得编造\n"
         f"2. 中文回答，简洁专业\n"
         f"3. 直接回答用户问题，不要列出'缺少哪些数据'或'数据不足'的说明\n"
-        f"4. 使用中文数字标题分段（一、二、三…）\n"
-        f"5. 每个标题下按行列出指标，每行不超过15字，格式：指标名：数值\n"
-        f"6. 异常、原因、建议分别成段，不要把所有内容挤成一段\n"
+        f"4. 只给结论和原因，不要输出分析思路、推理过程或自我对话\n"
     )
     return prompt
 
@@ -1232,7 +1232,10 @@ async def ai_chat_stream(
     """Stream AI chat response via SSE."""
     # Handle empty/init requests FIRST — no DB queries needed
     if not body.question or not body.question.strip() or body.question.strip() == "__init__":
-        suggestions_json = json.dumps(["本月收入与毛利概况", "收入同比分析", "部门收入拆解"])
+        # Page-specific init suggestions based on active_section
+        _init_active = body.context.active_section if body.context else ""
+        _init_suggestions = _get_page_suggestions({}, [], [], _init_active, page_type=_init_active or "dashboard")
+        suggestions_json = json.dumps(_init_suggestions, ensure_ascii=False)
         async def gen_init():
             yield f"data: {{\"suggestions\": {suggestions_json}, \"done\": true}}\n\n"
         return StreamingResponse(gen_init(), media_type="text/event-stream")
