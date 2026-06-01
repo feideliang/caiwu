@@ -621,10 +621,19 @@ const recommendations = ref<AnalysisRecommendations>();
 
 async function loadRecommendations() {
   try {
+    const extra: Record<string, string | undefined> = {};
+    if (dimension.value === 'customer' && selectedEntity.value) {
+      extra.customer = selectedEntity.value;
+    } else if (dimension.value === 'product_line' && selectedEntity.value) {
+      extra.product = selectedEntity.value;
+    } else if (dimension.value === 'department') {
+      extra.department = selectedEntity.value || (authStore.isDeptRestricted ? authStore.department : undefined);
+    }
     const { data } = await getAnalysisRecommendations({
       page_type: 'core_metrics',
       period: period.value,
       period_compare_type: compareBase.value,
+      ...extra,
     });
     recommendations.value = data.data || undefined;
   } catch { /* non-critical */ }

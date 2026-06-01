@@ -1359,6 +1359,7 @@ async def get_analysis_recommendations(
     # Fetch current KPI data
     dept_param = body.department if body.department else None
     prod_param = body.product if body.product else None
+    cust_param = body.customer if body.customer else None
 
     kpis = await _build_kpis(
         db,
@@ -1367,6 +1368,7 @@ async def get_analysis_recommendations(
         period=body.period,
         department=dept_param,
         product=prod_param,
+        customer=cust_param,
     )
 
     # Fetch department breakdown if needed
@@ -1407,9 +1409,10 @@ async def get_analysis_recommendations(
             result = await MetricsService.get_core_metrics(
                 db=session,
                 period=body.period,
-                dimension="company",
+                dimension="customer" if cust_param else "company",
                 compare="mom",
                 period_dimension=body.period_dimension or "monthly",
+                customer=cust_param,
                 bgbu_filter=bgbu_filter,
                 sections={"customer_breakdown"},
             )

@@ -98,7 +98,7 @@ function onCustomRangeChange(dates: any) {
   }
 }
 
-watch([selectedPeriod, periodDimension], () => {
+watch([selectedPeriod, periodDimension, selectedMarketLine, selectedProduct], () => {
   if (periodDimension.value !== 'custom') {
     periodStart.value = undefined;
     periodEnd.value = undefined;

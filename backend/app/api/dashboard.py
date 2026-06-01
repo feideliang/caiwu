@@ -51,6 +51,7 @@ async def _build_kpis(
     period_end: str | None = None,
     department: str | None = None,
     product: str | None = None,
+    customer: str | None = None,
     user: TokenPayload | None = None,
 ) -> dict:
     from app.db.session import async_session_factory
@@ -71,6 +72,8 @@ async def _build_kpis(
         dim = "product_line"
     elif department:
         dim = "department"
+    elif customer:
+        dim = "customer"
     else:
         dim = "company"
 
@@ -89,6 +92,7 @@ async def _build_kpis(
                 period_end=period_end,
                 product=product,
                 department=department,
+                customer=customer,
                 bgbu_filter=bgbu_filter,
                 sections={"summary", "trend_series"},
             )

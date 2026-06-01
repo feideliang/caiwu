@@ -321,10 +321,12 @@ const recommendations = ref<AnalysisRecommendations>();
 
 async function loadRecommendations() {
   try {
+    const customerParam = drillMode.value ? drillCustomer.value : selectedCustomer.value;
     const { data } = await getAnalysisRecommendations({
       page_type: 'customer',
       period: period.value,
       period_compare_type: compareBase.value,
+      customer: customerParam,
     });
     recommendations.value = data.data || undefined;
   } catch { /* non-critical */ }

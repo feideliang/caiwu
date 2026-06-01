@@ -287,11 +287,18 @@ const recommendations = ref<AnalysisRecommendations>();
 
 async function loadRecommendations() {
   try {
+    const extra: Record<string, string | undefined> = {};
+    if (trendDimension.value === 'department' && selectedEntity.value) {
+      extra.department = selectedEntity.value;
+    } else if (trendDimension.value === 'product_line' && selectedEntity.value) {
+      extra.product = selectedEntity.value;
+    }
     const { data } = await getAnalysisRecommendations({
       page_type: 'trend',
       period: period.value,
       period_compare_type: compareBase.value,
       period_dimension: periodDimension.value,
+      ...extra,
     });
     recommendations.value = data.data || undefined;
   } catch { /* non-critical */ }
@@ -338,13 +345,11 @@ async function loadEntityOptions() {
 
 function refresh() { fetchMetrics(); }
 
-watch([periodDimension, selectedPeriod, trendDimension], async () => {
+watch([periodDimension, selectedPeriod, trendDimension, selectedEntity, compareBase], async () => {
   await loadEntityOptions();
   fetchMetrics();
   loadRecommendations();
 });
-watch(selectedEntity, refresh);
-watch(compareBase, refresh);
 
 onMounted(async () => { await fetchOptions(); await fetchMetrics(); loadRecommendations(); });
 </script>
