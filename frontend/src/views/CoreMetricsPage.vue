@@ -142,22 +142,22 @@
               <KpiCard title="基期毛利率" :value="basePeriodData?.summary?.gross_margin || 0" unit="%" :precision="2" />
             </a-col>
             <a-col :span="8">
-              <KpiCard title="毛利率变化" :value="marginChangeValue" unit="pp" :precision="4" />
+              <KpiCard title="毛利率变化" :value="marginChangeValue" unit="pp" :precision="2" />
             </a-col>
           </a-row>
           <a-divider style="margin: 0 0 16px 0" />
           <a-row :gutter="[16, 16]">
             <a-col :span="6">
-              <KpiCard title="存续结构影响" :value="continuingStructureImpact" unit="pp" :precision="4" />
+              <KpiCard title="存续结构影响" :value="continuingStructureImpact" unit="pp" :precision="2" />
             </a-col>
             <a-col :span="6">
-              <KpiCard title="存续毛利影响" :value="continuingMarginImpact" unit="pp" :precision="4" />
+              <KpiCard title="存续毛利影响" :value="continuingMarginImpact" unit="pp" :precision="2" />
             </a-col>
             <a-col :span="6">
-              <KpiCard title="新增影响" :value="newImpact" unit="pp" :precision="4" />
+              <KpiCard title="新增影响" :value="newImpact" unit="pp" :precision="2" />
             </a-col>
             <a-col :span="6">
-              <KpiCard title="退出影响" :value="exitImpact" unit="pp" :precision="4" />
+              <KpiCard title="退出影响" :value="exitImpact" unit="pp" :precision="2" />
             </a-col>
           </a-row>
         </a-card>
@@ -458,7 +458,22 @@ const marginChangeValue = computed(() => {
   const curr = metricsData.value?.summary?.gross_margin;
   const base = basePeriodData.value?.summary?.gross_margin;
   if (curr == null || base == null) return 0;
-  return curr - base;
+  const rawDiff = curr - base;
+
+  // Cross-check: sum of total_impact from breakdown should match overall margin change
+  const breakdown = metricsData.value?.summary?.margin_change_analysis || [];
+  if (breakdown.length > 0) {
+    const summedImpact = breakdown.reduce(
+      (sum, r: any) => sum + ((r.total_impact as number) || 0),
+      0,
+    );
+    const delta = rawDiff - summedImpact;
+    // If difference exceeds 0.01pp, float the display to match the summed breakdown
+    if (Math.abs(delta) > 0.01) {
+      return summedImpact;
+    }
+  }
+  return rawDiff;
 });
 
 const columnTooltips: Record<string, string> = {

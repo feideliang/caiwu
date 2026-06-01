@@ -28,7 +28,7 @@
       </a-table-column>
     </a-table>
 
-    <a-modal v-model:visible="modalVisible" :title="isEdit ? '编辑数据源' : '添加数据源'" @ok="handleSave">
+    <a-modal v-model:open="modalVisible" :title="isEdit ? '编辑数据源' : '添加数据源'" @ok="handleSave">
       <a-form :model="editing" layout="vertical">
         <a-form-item label="名称"><a-input v-model:value="editing.name" /></a-form-item>
         <a-form-item label="类型">

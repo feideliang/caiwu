@@ -11,7 +11,7 @@
 	          <a-table-column title="事业部" dataIndex="department" key="department" />
           <a-table-column title="操作"><template #default="{ record }"><a-button type="link" danger @click="handleDeleteUser(record.id)">删除</a-button></template></a-table-column>
         </a-table>
-        <a-modal v-model:visible="userModal" title="添加用户" @ok="handleCreateUser">
+        <a-modal v-model:open="userModal" title="添加用户" @ok="handleCreateUser">
           <a-form layout="vertical">
             <a-form-item label="用户名"><a-input v-model:value="newUser.username" /></a-form-item>
             <a-form-item label="密码"><a-input-password v-model:value="newUser.password" /></a-form-item>
@@ -53,7 +53,7 @@
             </template>
           </a-table-column>
         </a-table>
-        <a-modal v-model:visible="ruleModalVisible" :title="editingRule ? '编辑规则' : '添加规则'" @ok="handleSaveRule" width="600">
+        <a-modal v-model:open="ruleModalVisible" :title="editingRule ? '编辑规则' : '添加规则'" @ok="handleSaveRule" width="600">
           <a-form layout="vertical">
             <a-form-item label="分类"><a-input v-model:value="ruleForm.category" placeholder="如: anomaly_gross_margin" /></a-form-item>
             <a-form-item label="规则内容"><a-textarea v-model:value="ruleForm.rule_text" :rows="4" /></a-form-item>
@@ -61,7 +61,7 @@
             <a-form-item label="状态"><a-switch v-model:checked="ruleForm.is_active" checked-children="启用" un-checked-children="禁用" /></a-form-item>
           </a-form>
         </a-modal>
-        <a-modal v-model:visible="importModal" title="批量导入规则" @ok="handleImport" width="600">
+        <a-modal v-model:open="importModal" title="批量导入规则" @ok="handleImport" width="600">
           <p>粘贴 JSON 数组格式的规则：</p>
           <a-textarea v-model:value="importText" :rows="10" placeholder='[{"category":"anomaly_gross_margin","rule_text":"...","source_section":"...","is_active":true}]' />
         </a-modal>

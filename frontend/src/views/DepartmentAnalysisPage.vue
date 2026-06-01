@@ -139,7 +139,7 @@
     </div>
 
     <!-- Drill dimension picker modal -->
-    <a-modal v-model:visible="drillModalVisible" title="选择下钻维度" :footer="null" width="320px">
+    <a-modal v-model:open="drillModalVisible" title="选择下钻维度" :footer="null" width="320px">
       <a-space direction="vertical" style="width: 100%">
         <a-button type="primary" block size="large" @click="confirmDrillDim('product_line')">产品线</a-button>
         <a-button block size="large" @click="confirmDrillDim('customer')">客户</a-button>
@@ -246,6 +246,8 @@ const displayBreakdowns = computed<BreakdownItem[]>(() => {
   if (secondaryDimension.value === 'customer') {
     return metricsData.value?.customer_breakdown || [];
   }
+  const pl = metricsData.value?.product_line_breakdown;
+  if (pl && pl.length > 0) return pl;
   return breakdowns.value;
 });
 
@@ -415,7 +417,7 @@ async function fetchMetrics() {
     };
     if (drillLevel.value === 0) {
       params.dimension = 'department';
-      params.entity = selectedDept.value;
+      params.department = selectedDept.value;
     } else if (drillLevel.value === 1) {
       params.dimension = drillDim.value;
       params.department = drillDept.value;

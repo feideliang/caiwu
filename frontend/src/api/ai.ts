@@ -108,12 +108,11 @@ export function getAIConfig() {
 }
 
 import type { AnalysisRecommendationRequest, AnalysisRecommendations } from '@/types/analysis';
-import type { ApiResponse } from '@/types/api';
 
 export async function getAnalysisRecommendations(
   data: AnalysisRecommendationRequest,
 ) {
-  return post<ApiResponse<AnalysisRecommendations>>(
+  return post<AnalysisRecommendations>(
     '/ai/analysis-recommendations',
     data,
   );

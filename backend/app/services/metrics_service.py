@@ -215,11 +215,13 @@ class MetricsService:
 
         # ── Map entity parameter to dimension-specific params ──
         # Frontend uses 'entity' generically; backend needs dimension-specific param names
-        if entity and not product and not customer:
+        if entity and not product and not customer and not department:
             if dimension == 'product_line':
                 product = entity
             elif dimension == 'customer':
                 customer = entity
+            elif dimension == 'department':
+                department = entity
 
         # ── Cache check: data updates once per day, cache 24h ──
         _sections_key = ",".join(sorted(sections)) if sections else "all"
@@ -255,6 +257,7 @@ class MetricsService:
                 entity=entity,
                 summary=CoreMetricsSummary(),
                 breakdowns=[],
+                product_line_breakdown=[],
                 customer_breakdown=[],
                 contract_type_breakdown=[],
                 data_quality=DataQuality(
@@ -1524,6 +1527,40 @@ class MetricsService:
                 calculable=(c_rev is not None and c_gp is not None),
             ))
 
+        # ── Product line breakdown (query product_line dim_type directly) ─
+        product_line_breakdown: list[BreakdownItem] = []
+        if need_breakdowns or need_summary:
+            pl_q = select(
+                AggDimensionSummary.dim_value,
+                func.sum(AggDimensionSummary.revenue).label("revenue"),
+                func.sum(AggDimensionSummary.cost).label("cost"),
+                func.sum(AggDimensionSummary.gross_profit).label("gross_profit"),
+            ).where(
+                AggDimensionSummary.period.in_(list(current_members)),
+                AggDimensionSummary.bgbu == bgbu_filter,
+                AggDimensionSummary.dim_type == "product_line",
+            ).group_by(AggDimensionSummary.dim_value)
+            pl_rows = (await db.execute(pl_q)).all()
+            total_pl_rev = sum(float(r[1] or 0) for r in pl_rows)
+            if total_pl_rev > 0:
+                for pl_name, p_rev, p_cost, p_gp in sorted(
+                    [(r[0], float(r[1] or 0), float(r[2] or 0), float(r[3] or 0)) for r in pl_rows],
+                    key=lambda x: x[1], reverse=True
+                ):
+                    p_gm = _safe_div(p_gp, p_rev) * 100 if p_rev else None
+                    p_contrib = _safe_div(p_gp, total_pl_rev) * 100 if total_pl_rev else None
+                    p_rev_contrib = _safe_div(p_rev, total_pl_rev) * 100 if total_pl_rev else None
+                    product_line_breakdown.append(BreakdownItem(
+                        dimension_value=pl_name,
+                        revenue=_round(p_rev),
+                        tax_excluded_cost=_round(p_cost),
+                        gross_profit=_round(p_gp),
+                        gross_margin=_round(p_gm),
+                        revenue_contribution=_round(p_rev_contrib),
+                        gross_margin_contribution=_round(p_contrib),
+                        calculable=(p_rev is not None and p_gp is not None),
+                    ))
+
         # ── Contract type breakdown ───────────────────────────────
         contract_type_breakdown: list[BreakdownItem] = []
         total_ct_rev = sum((bk.get("revenue", 0) or 0) for bk in current_ct_buckets.values())
@@ -1555,6 +1592,7 @@ class MetricsService:
             entity=entity,
             summary=summary,
             breakdowns=breakdowns,
+            product_line_breakdown=product_line_breakdown,
             customer_breakdown=customer_breakdown,
             contract_type_breakdown=contract_type_breakdown,
             trend_series=trend,
