@@ -685,19 +685,22 @@ async function fetchMetrics() {
     }
   } catch {
     if (key !== fetchKey) return;
-    // Don't null out metricsData if only base period fetch failed
+    metricsData.value = null;
+    basePeriodData.value = null;
   } finally {
     loading.value = false;
   }
 }
 
 async function fetchOptions() {
-  const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
-  const periods = ((periodResp.data as any)?.options || []) as string[];
-  allPeriods.value = periods;
-  if (!selectedPeriod.value && periods.length) {
-    selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
-  }
+  try {
+    const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
+    const periods = ((periodResp.data as any)?.options || []) as string[];
+    allPeriods.value = periods;
+    if (!selectedPeriod.value && periods.length) {
+      selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
+    }
+  } catch { /* interceptor handles errors */ }
 }
 
 async function loadEntityOptions() {

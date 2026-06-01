@@ -323,12 +323,14 @@ async function fetchMetrics() {
 }
 
 async function fetchOptions() {
-  const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
-  const periods = ((periodResp.data as any)?.options || []) as string[];
-  allPeriods.value = periods;
-  if (!selectedPeriod.value && periods.length) {
-    selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
-  }
+  try {
+    const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
+    const periods = ((periodResp.data as any)?.options || []) as string[];
+    allPeriods.value = periods;
+    if (!selectedPeriod.value && periods.length) {
+      selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
+    }
+  } catch { /* interceptor handles errors */ }
 }
 
 async function loadEntityOptions() {

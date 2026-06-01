@@ -135,12 +135,12 @@ async function handlePredict() {
       prediction_type: metricType.value,
       horizon: horizonMonths.value,
     });
-    const result = data.data as PredictionResult;
-    currentPredictionId = result.id;
+    const result = (data.data as any)?.data as PredictionResult;
+    currentPredictionId = result?.id;
     prediction.value = result;
 
     // Start polling for completion
-    startPolling(result.id);
+    startPolling(result?.id);
   } finally {
     creating.value = false;
   }
@@ -149,7 +149,7 @@ async function handlePredict() {
 async function fetchPrediction(id: number) {
   try {
     const { data } = await getPrediction(id);
-    prediction.value = data.data as PredictionResult;
+    prediction.value = (data.data as any)?.data as PredictionResult;
 
     // Show insufficient data message if present
     const resultData = data.data as unknown as Record<string, unknown>;

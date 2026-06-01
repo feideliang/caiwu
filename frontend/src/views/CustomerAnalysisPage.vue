@@ -238,7 +238,7 @@ const isMom = computed(() => compareBase.value === 'mom');
 const revTrend = computed(() => isMom.value ? summary.value?.revenue_mom_growth : summary.value?.revenue_yoy_growth);
 const gpTrend = computed(() => isMom.value ? summary.value?.gross_profit_mom_growth : summary.value?.gross_profit_yoy_growth);
 const gmTrend = computed(() => isMom.value ? summary.value?.gross_margin_mom_change : summary.value?.gross_margin_yoy_change);
-const top10Trend = computed(() => summary.value?.customer_concentration_top3_change);
+const top10Trend = computed(() => undefined);
 
 // Table columns
 const tableColumns = computed(() => [
@@ -356,15 +356,17 @@ async function fetchMetrics() {
 }
 
 async function fetchOptions() {
-  const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
-  const periods = ((periodResp.data as any)?.options || []) as string[];
-  allPeriods.value = periods;
-  if (!selectedPeriod.value && periods.length) {
-    selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
-  }
-  const { data: custResp } = await getFilterOptions({ dimension: 'customer' });
-  const customers = ((custResp.data as any)?.options || []) as string[];
-  customerOptions.value = customers.map((v) => ({ label: v, value: v }));
+  try {
+    const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
+    const periods = ((periodResp.data as any)?.options || []) as string[];
+    allPeriods.value = periods;
+    if (!selectedPeriod.value && periods.length) {
+      selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
+    }
+    const { data: custResp } = await getFilterOptions({ dimension: 'customer' });
+    const customers = ((custResp.data as any)?.options || []) as string[];
+    customerOptions.value = customers.map((v) => ({ label: v, value: v }));
+  } catch { /* interceptor handles errors */ }
 }
 
 function refresh() { fetchMetrics(); }

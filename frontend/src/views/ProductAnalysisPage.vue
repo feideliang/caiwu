@@ -309,8 +309,8 @@ const productRevenueMarginCompare = computed(() =>
     .slice(0, 10)
     .map((b) => ({
       [secondaryDimLabel.value]: b.dimension_value,
-      '营业收入(万元)': b.revenue || 0,
-      '毛利额(万元)': b.gross_profit || 0,
+      '营业收入(万元)': Math.round((toWan(b.revenue) || 0) * 100) / 100,
+      '毛利额(万元)': Math.round((toWan(b.gross_profit) || 0) * 100) / 100,
       毛利率: b.gross_margin || 0,
     }))
 );
@@ -333,8 +333,8 @@ const productBubble = computed(() =>
     .slice(0, 10)
     .map((b) => ({
       [secondaryDimLabel.value]: b.dimension_value,
-      '收入(万元)': b.revenue || 0,
-      '毛利额(万元)': b.gross_profit || 0,
+      '收入(万元)': Math.round((toWan(b.revenue) || 0) * 100) / 100,
+      '毛利额(万元)': Math.round((toWan(b.gross_profit) || 0) * 100) / 100,
       size: b.revenue || 0,
     }))
 );
@@ -383,15 +383,17 @@ async function fetchMetrics() {
 }
 
 async function fetchOptions() {
-  const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
-  const periods = ((periodResp.data as any)?.options || []) as string[];
-  allPeriods.value = periods;
-  if (!selectedPeriod.value && periods.length) {
-    selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
-  }
-  const { data: prodResp } = await getFilterOptions({ dimension: 'product_line' });
-  const prods = ((prodResp.data as any)?.options || []) as string[];
-  productOptions.value = prods.map((v) => ({ label: v, value: v }));
+  try {
+    const { data: periodResp } = await getFilterOptions({ dimension: 'period' });
+    const periods = ((periodResp.data as any)?.options || []) as string[];
+    allPeriods.value = periods;
+    if (!selectedPeriod.value && periods.length) {
+      selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
+    }
+    const { data: prodResp } = await getFilterOptions({ dimension: 'product_line' });
+    const prods = ((prodResp.data as any)?.options || []) as string[];
+    productOptions.value = prods.map((v) => ({ label: v, value: v }));
+  } catch { /* interceptor handles errors */ }
 }
 
 function refresh() { fetchMetrics(); }
