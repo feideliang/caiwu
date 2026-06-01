@@ -345,8 +345,15 @@ async function loadEntityOptions() {
 
 function refresh() { fetchMetrics(); }
 
-watch([periodDimension, selectedPeriod, trendDimension, selectedEntity, compareBase], async () => {
+// Reload entity options only when dimension changes (clears previous selection)
+watch(trendDimension, async () => {
   await loadEntityOptions();
+  fetchMetrics();
+  loadRecommendations();
+});
+
+// Refresh data and recommendations on other filter changes
+watch([periodDimension, selectedPeriod, selectedEntity, compareBase], () => {
   fetchMetrics();
   loadRecommendations();
 });
