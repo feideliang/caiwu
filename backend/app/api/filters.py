@@ -19,7 +19,7 @@ from app.core.exceptions import ResourceNotFoundError
 from app.core.response import APIResponse
 from app.core.security import get_current_user, TokenPayload
 from app.db.session import get_db
-from app.models.core import AggDimensionSummary, AggPeriodSummary
+from app.models.core import AggDimensionSummary, AggPeriodSummary, IncomeMarginDetail
 from app.models.v3 import FilterView
 from app.schemas.filters import (
     FilterCondition,
@@ -123,13 +123,28 @@ async def get_filter_options(
                 )
             else:
                 agg_type = dim_type_map[dimension]
-                stmt = (
-                    select(AggDimensionSummary.dim_value)
-                    .where(AggDimensionSummary.bgbu == bgbu)
-                    .where(AggDimensionSummary.dim_type == agg_type)
-                    .distinct()
-                    .order_by(AggDimensionSummary.dim_value)
-                )
+                if dimension == "customer":
+                    # Return 上级名称 (superior_name) for customer dropdown
+                    imd_bgbu_cond = (
+                        IncomeMarginDetail.bgbu == bgbu
+                        if bgbu != "ALL"
+                        else IncomeMarginDetail.bgbu != "ALL"
+                    )
+                    stmt = (
+                        select(IncomeMarginDetail.superior_name)
+                        .where(imd_bgbu_cond)
+                        .where(IncomeMarginDetail.superior_name.isnot(None))
+                        .distinct()
+                        .order_by(IncomeMarginDetail.superior_name)
+                    )
+                else:
+                    stmt = (
+                        select(AggDimensionSummary.dim_value)
+                        .where(AggDimensionSummary.bgbu == bgbu)
+                        .where(AggDimensionSummary.dim_type == agg_type)
+                        .distinct()
+                        .order_by(AggDimensionSummary.dim_value)
+                    )
             if prefix:
                 col = stmt.selected_columns[0]
                 stmt = stmt.where(col.like(f"{prefix}%"))
