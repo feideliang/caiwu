@@ -284,6 +284,20 @@ async def ai_analyze(
 
 logger = logging.getLogger(__name__)
 
+
+def _infer_period_dimension(period: str | None, period_dimension: str | None) -> str | None:
+    """Infer period_dimension from period format if not explicitly provided.
+
+    When period is in quarterly format (e.g. '2026-Q2') and period_dimension
+    is not set, return 'quarterly' so downstream queries correctly resolve
+    the quarterly key to its constituent months (e.g. 2026-04, 2026-05, 2026-06).
+    """
+    if period_dimension:
+        return period_dimension
+    if period and re.match(r'^\d{4}-Q[1-4]$', period):
+        return 'quarterly'
+    return period_dimension
+
 _KNOWLEDGE_BASE_RULES = (
     "【业务规则知识库】\n"
 
@@ -918,45 +932,41 @@ async def ai_chat(
     active_section = body.context.active_section if body.context else ""
     page_type_hint = body.context.page_type if hasattr(body.context, 'page_type') and body.context.page_type else ""
     if active_section not in ("customer",):
-        from app.db.session import async_session_factory
         from app.services.metrics_service import MetricsService
-        async with async_session_factory() as session:
-            dept_r = await MetricsService.get_core_metrics(
-                db=session,
-                period=body.context.period if body.context else None,
-                dimension="department",
-                compare="mom",
-                period_dimension=body.context.period_dimension if body.context else "monthly",
-                bgbu_filter="ALL",
-                sections={"breakdowns"},
-            )
-            dept_items = [b.model_dump() for b in (dept_r.breakdowns or [])]
-            prod_r = await MetricsService.get_core_metrics(
-                db=session,
-                period=body.context.period if body.context else None,
-                dimension="product_line",
-                compare="mom",
-                period_dimension=body.context.period_dimension if body.context else "monthly",
-                bgbu_filter="ALL",
-                sections={"breakdowns"},
-            )
-            prod_items = [b.model_dump() for b in (prod_r.breakdowns or [])]
+        dept_r = await MetricsService.get_core_metrics(
+            db=db,
+            period=body.context.period if body.context else None,
+            dimension="department",
+            compare="mom",
+            period_dimension=body.context.period_dimension if body.context else "monthly",
+            bgbu_filter="ALL",
+            sections={"breakdowns"},
+        )
+        dept_items = [b.model_dump() for b in (dept_r.breakdowns or [])]
+        prod_r = await MetricsService.get_core_metrics(
+            db=db,
+            period=body.context.period if body.context else None,
+            dimension="product_line",
+            compare="mom",
+            period_dimension=body.context.period_dimension if body.context else "monthly",
+            bgbu_filter="ALL",
+            sections={"breakdowns"},
+        )
+        prod_items = [b.model_dump() for b in (prod_r.breakdowns or [])]
 
     # Fetch customer breakdown for customer-focused pages
     customer_items = []
     if active_section in ("customer", "overview") or page_type_hint == "customer":
-        from app.db.session import async_session_factory
         from app.services.metrics_service import MetricsService
-        async with async_session_factory() as session:
-            cust_result = await MetricsService.get_core_metrics(
-                db=session,
-                period=body.context.period if body.context else None,
-                dimension="company",
-                compare="mom",
-                bgbu_filter="ALL",
-                sections={"customer_breakdown"},
-            )
-            customer_items = [b.model_dump() for b in cust_result.customer_breakdown]
+        cust_result = await MetricsService.get_core_metrics(
+            db=db,
+            period=body.context.period if body.context else None,
+            dimension="company",
+            compare="mom",
+            bgbu_filter="ALL",
+            sections={"customer_breakdown"},
+        )
+        customer_items = [b.model_dump() for b in cust_result.customer_breakdown]
 
     db_elapsed = time.time() - t0
 
@@ -1352,6 +1362,12 @@ async def get_analysis_recommendations(
     from app.db.session import async_session_factory
     from app.services.metrics_service import MetricsService
 
+    # Auto-detect period_dimension from the period string when not explicit.
+    # E.g. period='2026-Q2' should set period_dimension='quarterly' so
+    # downstream queries resolve the quarterly key to its constituent months.
+    period_dimension = _infer_period_dimension(body.period, body.period_dimension)
+    resolved_pd = period_dimension or "monthly"
+
     bgbu_filter = "ALL"
     if user and user.role != "admin" and user.department:
         bgbu_filter = user.department
@@ -1364,7 +1380,7 @@ async def get_analysis_recommendations(
     kpis = await _build_kpis(
         db,
         period_compare_type=body.period_compare_type,
-        period_dimension=body.period_dimension,
+        period_dimension=period_dimension,
         period=body.period,
         department=dept_param,
         product=prod_param,
@@ -1374,49 +1390,46 @@ async def get_analysis_recommendations(
     # Fetch department breakdown if needed
     dept_items = []
     if body.page_type in ("department", "dashboard", "core_metrics"):
-        async with async_session_factory() as session:
-            result = await MetricsService.get_core_metrics(
-                db=session,
-                period=body.period,
-                dimension="department",
-                compare="mom",
-                period_dimension=body.period_dimension or "monthly",
-                bgbu_filter=bgbu_filter,
-                sections={"breakdowns"},
-            )
-            dept_items = [b.model_dump() for b in result.breakdowns]
+        result = await MetricsService.get_core_metrics(
+            db=db,
+            period=body.period,
+            dimension="department",
+            compare="mom",
+            period_dimension=resolved_pd,
+            bgbu_filter=bgbu_filter,
+            sections={"breakdowns"},
+        )
+        dept_items = [b.model_dump() for b in result.breakdowns]
 
     # Fetch product breakdown
     prod_items = []
     if body.page_type in ("product", "dashboard", "core_metrics"):
-        async with async_session_factory() as session:
-            result = await MetricsService.get_core_metrics(
-                db=session,
-                period=body.period,
-                dimension="product_line",
-                compare="mom",
-                period_dimension=body.period_dimension or "monthly",
-                product=prod_param,
-                bgbu_filter=bgbu_filter,
-                sections={"breakdowns"},
-            )
-            prod_items = [b.model_dump() for b in result.breakdowns]
+        result = await MetricsService.get_core_metrics(
+            db=db,
+            period=body.period,
+            dimension="product_line",
+            compare="mom",
+            period_dimension=resolved_pd,
+            product=prod_param,
+            bgbu_filter=bgbu_filter,
+            sections={"breakdowns"},
+        )
+        prod_items = [b.model_dump() for b in result.breakdowns]
 
     # Fetch customer breakdown
     customer_items = []
     if body.page_type in ("customer", "dashboard"):
-        async with async_session_factory() as session:
-            result = await MetricsService.get_core_metrics(
-                db=session,
-                period=body.period,
-                dimension="customer" if cust_param else "company",
-                compare="mom",
-                period_dimension=body.period_dimension or "monthly",
-                customer=cust_param,
-                bgbu_filter=bgbu_filter,
-                sections={"customer_breakdown"},
-            )
-            customer_items = [b.model_dump() for b in result.customer_breakdown]
+        result = await MetricsService.get_core_metrics(
+            db=db,
+            period=body.period,
+            dimension="customer" if cust_param else "company",
+            compare="mom",
+            period_dimension=resolved_pd,
+            customer=cust_param,
+            bgbu_filter=bgbu_filter,
+            sections={"customer_breakdown"},
+        )
+        customer_items = [b.model_dump() for b in result.customer_breakdown]
 
     recommendations = build_analysis_recommendations(
         kpis=kpis,

@@ -369,8 +369,8 @@ async function fetchMetrics() {
     const { data: resp } = await getCoreMetrics({
       period: period.value,
       dimension: currentDimension.value,
-      entity: drillMode.value ? undefined : selectedProduct.value,
-      product: drillMode.value ? drillProduct.value : undefined,
+      entity: drillMode.value ? drillProduct.value : selectedProduct.value,
+      product: undefined,
       period_dimension: periodDimension.value,
       compare: compareBase.value,
       period_start: periodStart.value,

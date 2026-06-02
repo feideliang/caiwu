@@ -343,8 +343,7 @@ async function fetchMetrics() {
       period_end: periodEnd.value,
     };
     if (drillMode.value && drillCustomer.value) {
-      params.customer = drillCustomer.value;
-      params.dimension = 'sales_product';
+      params.entity = drillCustomer.value;
     } else if (selectedCustomer.value) {
       params.entity = selectedCustomer.value;
     }
