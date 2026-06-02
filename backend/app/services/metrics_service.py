@@ -562,7 +562,6 @@ class MetricsService:
                         IncomeMarginDetail.period.in_(list(detail_periods)),
                         imd_bgbu_cond,
                         IncomeMarginDetail.product_bgbu == product,
-                        IncomeMarginDetail.superior_name.isnot(None),
                     )
                     .group_by(IncomeMarginDetail.period)
                 )
@@ -1280,7 +1279,7 @@ class MetricsService:
                     })
 
         def _count_consecutive_in_range(periods: list[str], metric_key: str) -> int:
-            """Count consecutive MoM growth streak within the selected period range.
+            """Count max consecutive MoM growth streak within the selected period range.
 
             Only counts where both the current and comparison periods are within
             the selected range (e.g., for cumulative YTD, only counts months
@@ -1304,14 +1303,16 @@ class MetricsService:
                 prev_val = values[i - 1][1]
                 curr_val = values[i][1]
                 mom_changes.append(curr_val > prev_val if prev_val else False)
-            # Count streak from latest backwards
-            streak = 0
-            for i in range(len(mom_changes) - 1, -1, -1):
-                if mom_changes[i]:
-                    streak += 1
+            # Count max consecutive growth streak (longest run of True)
+            max_streak = 0
+            current_streak = 0
+            for is_growth in mom_changes:
+                if is_growth:
+                    current_streak += 1
+                    max_streak = max(max_streak, current_streak)
                 else:
-                    break
-            return streak
+                    current_streak = 0
+            return max_streak
 
         summary.revenue_consecutive_growth = _count_consecutive_in_range(current_members, 'revenue')
         summary.gross_profit_consecutive_growth = _count_consecutive_in_range(current_members, 'gross_profit')
@@ -1430,7 +1431,7 @@ class MetricsService:
                 margin_summary.exit_impact = sum(
                     i.total_impact or 0 for i in margin_analysis if i.category == "exit")
 
-            margin_analysis.sort(key=lambda item: abs(item.total_impact or 0), reverse=True)
+            margin_analysis.sort(key=lambda item: item.total_impact or 0, reverse=True)
             summary.margin_change_analysis = margin_analysis
 
             # ── Compute MoM of impact factors ──

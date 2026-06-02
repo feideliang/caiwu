@@ -36,7 +36,7 @@
               <a-select-option value="custom_compare">自定义期间</a-select-option>
             </a-select>
             <!-- Customer selector -->
-            <a-select v-model:value="selectedCustomer" :options="customerOptions" style="width: 180px" placeholder="客户" allow-clear />
+            <a-select v-model:value="selectedCustomer" :options="filteredCustomerOptions" style="width: 180px" placeholder="客户" allow-clear show-search @search="val => customerSearchValue.value = val" />
             <!-- Secondary dimension selector -->
             <a-select v-if="selectedCustomer" v-model:value="secondaryDimension" style="width: 130px" placeholder="对比维度">
               <a-select-option value="customer">客户</a-select-option>
@@ -184,6 +184,12 @@ const periodStart = ref<string | undefined>();
 const periodEnd = ref<string | undefined>();
 const allPeriods = ref<string[]>([]);
 const customerOptions = ref<Array<{ label: string; value: string }>>([]);
+const customerSearchValue = ref('');
+const filteredCustomerOptions = computed(() => {
+  if (!customerSearchValue.value) return customerOptions.value;
+  const kw = customerSearchValue.value.toLowerCase();
+  return customerOptions.value.filter(o => o.label.toLowerCase().includes(kw));
+});
 const loading = ref(false);
 const metricsData = ref<CoreMetricsResponse | null>(null);
 
