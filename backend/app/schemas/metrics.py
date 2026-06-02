@@ -54,8 +54,12 @@ class CoreMetricsSummary(BaseModel):
     margin_change_analysis: list[MarginChangeItem] | None = None
     margin_change_summary: MarginChangeSummary | None = None
     revenue_yoy_growth: float | None = None
+    revenue_yoy_change: float | None = None
+    revenue_mom_change: float | None = None
     cost_yoy_growth: float | None = None
     gross_profit_yoy_growth: float | None = None
+    gross_profit_yoy_change: float | None = None
+    gross_profit_mom_change: float | None = None
     base_revenue: float | None = None
     base_gross_profit: float | None = None
     revenue_mom_growth: float | None = None

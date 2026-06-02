@@ -13,7 +13,11 @@ export interface CoreMetricsSummary {
   product_concentration_top10?: number;
   high_margin_order_ratio?: number;
   revenue_yoy_growth?: number;
+  revenue_yoy_change?: number;
+  revenue_mom_change?: number;
   gross_profit_yoy_growth?: number;
+  gross_profit_yoy_change?: number;
+  gross_profit_mom_change?: number;
   top_customer_share?: number;
   top_product_margin_share?: number;
   revenue_consecutive_growth?: number;

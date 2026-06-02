@@ -36,10 +36,10 @@
       <!-- KPI Cards -->
       <a-row :gutter="[16, 16]" class="kpi-row">
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="收入" :value="toWan(summary?.revenue)" unit="万元" :precision="0" :trend="compareBase === 'mom' ? summary?.revenue_mom_growth : summary?.revenue_yoy_growth" />
+          <KpiCard title="收入" :value="toWan(summary?.revenue)" unit="万元" :precision="0" :trend="compareBase === 'mom' ? summary?.revenue_mom_change : summary?.revenue_yoy_change" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
-          <KpiCard title="毛利额" :value="toWan(summary?.gross_profit)" unit="万元" :precision="0" :trend="compareBase === 'mom' ? summary?.gross_profit_mom_growth : summary?.gross_profit_yoy_growth" />
+          <KpiCard title="毛利额" :value="toWan(summary?.gross_profit)" unit="万元" :precision="0" :trend="compareBase === 'mom' ? summary?.gross_profit_mom_change : summary?.gross_profit_yoy_change" />
         </a-col>
         <a-col :xs="12" :sm="12" :md="6">
           <KpiCard title="订单数" :value="summary?.order_count || 0" unit="笔" :trend="orderCountTrend" />
@@ -220,7 +220,7 @@ const grossMarginTrend = computed(() => {
   const ts = metricsData.value?.trend_series || [];
   if (!ts.length) return undefined;
   const latest = ts[ts.length - 1];
-  const key = compareBase.value === 'mom' ? 'gross_margin_mom_growth' as const : 'gross_margin_yoy_growth' as const;
+  const key = compareBase.value === 'mom' ? 'gross_margin_mom_change' as const : 'gross_margin_yoy_change' as const;
   return latest[key] ?? undefined;
 });
 
