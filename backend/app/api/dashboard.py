@@ -130,6 +130,11 @@ async def _build_kpis(
         "profit_cumulative_growth": round(summary.gross_profit_yoy_growth, 2) if (period_dimension == "cumulative" and summary.gross_profit_yoy_growth is not None) else None,
         "revenue_consecutive_growth": (summary.revenue_consecutive_growth or 0) if period_dimension != "monthly" else None,
         "gross_profit_consecutive_growth": (summary.gross_profit_consecutive_growth or 0) if period_dimension != "monthly" else None,
+        "customer_concentration_top10": round(summary.customer_concentration_top10 or 0, 2),
+        "customer_concentration_top3": round(summary.customer_concentration_top3 or 0, 2),
+        "top_customer_share": round(summary.top_customer_share or 0, 2),
+        "high_margin_order_ratio": round(summary.high_margin_order_ratio or 0, 2),
+        "negative_margin_order_ratio": round(summary.negative_margin_order_ratio or 0, 2),
         "trend_series": [point.model_dump() for point in current.trend_series],
     }
 

@@ -648,20 +648,30 @@ def build_analysis_recommendations(
     elif page_type == "core_metrics":
         metrics = [
             MetricRecommendation(
-                metric_name="高毛利订单占比", metric_key="high_margin_order_ratio",
-                description="毛利率>40%的订单比例",
-                current_value=high_margin_ratio,
-                benchmark=50.0,
-                recommendation="高毛利订单占比反映业务质量"
+                metric_name="收入同比", metric_key="revenue_yoy_growth",
+                description="收入同比增长率",
+                current_value=rev_yoy,
+                status="warning" if rev_yoy is not None and rev_yoy < 0 else "normal",
+                recommendation="收入同比下滑需深入分析" if rev_yoy is not None and rev_yoy < 0 else "收入增长趋势良好"
             ),
             MetricRecommendation(
-                metric_name="负毛利订单占比", metric_key="negative_margin_order_ratio",
-                description="毛利为负的订单比例",
-                current_value=neg_margin_ratio,
-                status="warning" if neg_margin_ratio > 10 else "normal",
+                metric_name="毛利率", metric_key="gross_margin",
+                description="毛利占收入比",
+                current_value=gm,
+                benchmark=25.0,
+                status="critical" if 0 < gm < 10 else ("warning" if 0 < gm < 20 else "normal"),
+                recommendation="毛利率低于20%需重点关注" if 0 < gm < 20 else "毛利率处于正常水平"
+            ),
+            MetricRecommendation(
+                metric_name="客户集中度Top10", metric_key="customer_concentration_top10",
+                description="前10大客户收入占比",
+                current_value=cust_top10,
+                benchmark=50.0,
+                status="warning" if cust_top10 > 60 else "normal",
+                recommendation="客户集中度偏高，建议关注风险" if cust_top10 > 60 else "客户分布健康"
             ),
         ]
-        drill_down_path = ["交易明细", "异常订单"]
+        drill_down_path = ["部门维度", "产品维度", "客户维度"]
 
     elif page_type == "insights":
         metrics = [

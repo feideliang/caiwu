@@ -14,7 +14,7 @@ export default defineConfig({
     port: 3005,
     proxy: {
       '/api/v1': {
-        target: 'http://localhost:8015',
+        target: 'http://localhost:8020',
         changeOrigin: true,
         timeout: 300000,
         proxyTimeout: 300000,
