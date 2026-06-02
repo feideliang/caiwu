@@ -31,6 +31,17 @@ def create_celery_app() -> Celery:
     )
 
     app.conf.update(
+        # Explicitly list task modules — avoids autodiscover_tasks circular import
+        # (task modules import celery_app, but celery_app isn't ready until this returns)
+        include=[
+            "app.tasks.report_gen",
+            "app.tasks.prediction",
+            "app.tasks.notification",
+            "app.tasks.email_poll",
+            "app.tasks.rule_sync",
+            "app.tasks.rule_audit",
+            "app.tasks.dim_sync",
+        ],
         # Task queues
         task_queues={
             "default": {"exchange": "default", "routing_key": "default"},
@@ -83,8 +94,6 @@ def create_celery_app() -> Celery:
             },
         },
     )
-
-    app.autodiscover_tasks(["app.tasks"], force=True)
 
     return app
 

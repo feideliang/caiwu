@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from typing import Iterable
 
@@ -222,6 +223,8 @@ class MetricsService:
                 customer = entity
             elif dimension == 'department':
                 department = entity
+            elif dimension == 'sales_product':
+                customer = entity
 
         # ── Cache check: data updates once per day, cache 24h ──
         _sections_key = ",".join(sorted(sections)) if sections else "all"
@@ -458,20 +461,43 @@ class MetricsService:
         if not _is_company_dim and not _is_dept_dim:
             dim_type_key = _dim_type_map.get(dimension)
             if dim_type_key:
-                dim_q = select(AggDimensionSummary).where(
-                    AggDimensionSummary.period.in_(list(detail_periods)),
-                    AggDimensionSummary.bgbu == bgbu_filter,
-                    AggDimensionSummary.dim_type == dim_type_key,
-                )
-                if product and dimension == 'product_line':
-                    dim_q = dim_q.where(AggDimensionSummary.dim_value == product)
-                if customer and dimension == 'customer':
-                    dim_q = dim_q.where(AggDimensionSummary.dim_value == customer)
-                dim_rows = (await db.execute(dim_q)).scalars().all()
-                for row in dim_rows:
-                    period_dim_bucket[row.period][row.dim_value]["revenue"] += float(row.revenue or 0)
-                    period_dim_bucket[row.period][row.dim_value]["cost"] += float(row.cost or 0)
-                    period_dim_bucket[row.period][row.dim_value]["gross_profit"] += float(row.gross_profit or 0)
+                if customer and dimension == 'sales_product':
+                    # AggDimensionSummary has no customer field; query IncomeMarginDetail directly
+                    imd_sp_q = (
+                        select(
+                            IncomeMarginDetail.period,
+                            IncomeMarginDetail.sales_product_name,
+                            func.sum(IncomeMarginDetail.revenue_amount).label("revenue"),
+                            func.sum(IncomeMarginDetail.cost_amount).label("cost"),
+                            func.sum(IncomeMarginDetail.gross_profit_amount).label("gross_profit"),
+                        )
+                        .where(
+                            IncomeMarginDetail.period.in_(list(detail_periods)),
+                            imd_bgbu_cond,
+                            IncomeMarginDetail.superior_name == customer,
+                        )
+                        .group_by(IncomeMarginDetail.period, IncomeMarginDetail.sales_product_name)
+                    )
+                    imd_rows = (await db.execute(imd_sp_q)).all()
+                    for row in imd_rows:
+                        period_dim_bucket[row[0]][row[1] or "__empty__"]["revenue"] += float(row[2] or 0)
+                        period_dim_bucket[row[0]][row[1] or "__empty__"]["cost"] += float(row[3] or 0)
+                        period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
+                else:
+                    dim_q = select(AggDimensionSummary).where(
+                        AggDimensionSummary.period.in_(list(detail_periods)),
+                        AggDimensionSummary.bgbu == bgbu_filter,
+                        AggDimensionSummary.dim_type == dim_type_key,
+                    )
+                    if product and dimension == 'product_line':
+                        dim_q = dim_q.where(AggDimensionSummary.dim_value == product)
+                    if customer and dimension == 'customer':
+                        dim_q = dim_q.where(AggDimensionSummary.dim_value == customer)
+                    dim_rows = (await db.execute(dim_q)).scalars().all()
+                    for row in dim_rows:
+                        period_dim_bucket[row.period][row.dim_value]["revenue"] += float(row.revenue or 0)
+                        period_dim_bucket[row.period][row.dim_value]["cost"] += float(row.cost or 0)
+                        period_dim_bucket[row.period][row.dim_value]["gross_profit"] += float(row.gross_profit or 0)
 
         # Department breakdown: from period_summary per-bgbu rows
         period_dept_bucket: dict[str, dict[str, dict[str, float]]] = defaultdict(
@@ -582,7 +608,7 @@ class MetricsService:
                     period_customer_rev[period_val]["__total__"] = float(total_rev or 0)
 
                 # (2) Single query using ROW_NUMBER() window function for Top 30 per period
-                # Push the rn <= 30 filter into SQL via subquery to avoid fetching all rows
+                # Exclude empty customer names from numerator (still included in denominator via total_q)
                 _CUST_LIMIT = 30
                 from sqlalchemy import over, func as sql_func
                 row_num = (
@@ -607,6 +633,8 @@ class MetricsService:
                         AggDimensionSummary.period.in_(list(detail_periods)),
                         AggDimensionSummary.bgbu == bgbu_filter,
                         AggDimensionSummary.dim_type == "customer",
+                        AggDimensionSummary.dim_value.isnot(None),
+                        AggDimensionSummary.dim_value != '',
                     )
                 ).subquery()
                 # Filter ranked results in SQL
@@ -636,28 +664,54 @@ class MetricsService:
                         if bkt == 'revenue':
                             period_product_rev[p][dv] += val
         elif (need_breakdowns or need_summary) and not _is_product_dim:
-            # Push GROUP BY to SQL: aggregate revenue/cost/gp per (period, product)
-            prod_q = select(
-                AggDimensionSummary.period,
-                AggDimensionSummary.dim_value,
-                func.sum(AggDimensionSummary.revenue).label("revenue"),
-                func.sum(AggDimensionSummary.cost).label("cost"),
-                func.sum(AggDimensionSummary.gross_profit).label("gross_profit"),
-            ).where(
-                AggDimensionSummary.period.in_(list(detail_periods)),
-                AggDimensionSummary.bgbu == bgbu_filter,
-                AggDimensionSummary.dim_type == "sales_product",
-            ).group_by(
-                AggDimensionSummary.period,
-                AggDimensionSummary.dim_value,
-            )
-            prod_rows = (await db.execute(prod_q)).all()
-            for row in prod_rows:
-                period_product_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
-                period_product_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
-                period_product_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
-                period_product_gp[row[0]][row[1]] += float(row[4] or 0)
-                period_product_rev[row[0]][row[1]] += float(row[2] or 0)
+            if customer and dimension == 'sales_product':
+                # Query IncomeMarginDetail for customer-filtered sales_product breakdown
+                sp_imd_q = (
+                    select(
+                        IncomeMarginDetail.period,
+                        IncomeMarginDetail.sales_product_name,
+                        func.sum(IncomeMarginDetail.revenue_amount).label("revenue"),
+                        func.sum(IncomeMarginDetail.cost_amount).label("cost"),
+                        func.sum(IncomeMarginDetail.gross_profit_amount).label("gross_profit"),
+                    )
+                    .where(
+                        IncomeMarginDetail.period.in_(list(detail_periods)),
+                        imd_bgbu_cond,
+                        IncomeMarginDetail.superior_name == customer,
+                        IncomeMarginDetail.sales_product_name.isnot(None),
+                    )
+                    .group_by(IncomeMarginDetail.period, IncomeMarginDetail.sales_product_name)
+                )
+                sp_rows = (await db.execute(sp_imd_q)).all()
+                for row in sp_rows:
+                    period_product_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
+                    period_product_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
+                    period_product_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
+                    period_product_gp[row[0]][row[1]] += float(row[4] or 0)
+                    period_product_rev[row[0]][row[1]] += float(row[2] or 0)
+            else:
+                # Push GROUP BY to SQL: aggregate revenue/cost/gp per (period, product)
+                prod_q = select(
+                    AggDimensionSummary.period,
+                    AggDimensionSummary.dim_value,
+                    func.sum(AggDimensionSummary.revenue).label("revenue"),
+                    func.sum(AggDimensionSummary.cost).label("cost"),
+                    func.sum(AggDimensionSummary.gross_profit).label("gross_profit"),
+                ).where(
+                    AggDimensionSummary.period.in_(list(detail_periods)),
+                    AggDimensionSummary.bgbu == bgbu_filter,
+                    AggDimensionSummary.dim_type == "sales_product",
+                ).group_by(
+                    AggDimensionSummary.period,
+                    AggDimensionSummary.dim_value,
+                )
+                prod_rows = (await db.execute(prod_q)).all()
+                for row in prod_rows:
+                    period_product_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
+                    period_product_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
+                    period_product_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
+                    period_product_gp[row[0]][row[1]] += float(row[4] or 0)
+                    period_product_rev[row[0]][row[1]] += float(row[2] or 0)
 
         # Contract type breakdown
         period_ct_bucket: dict[str, dict[str, dict[str, float]]] = defaultdict(
@@ -1335,7 +1389,7 @@ class MetricsService:
                 summary.gross_margin_volatility_change = round(summary.gross_margin_volatility - prev_vol, 2)
 
         # ── Margin change impact decomposition ─────────────
-        if compare_members and dimension != "company":
+        if need_margin_analysis and compare_members and dimension != "company":
             prev_dim = _sum_nested_bucket_values(period_dim_bucket, compare_members)
             curr_dim = current_dim_buckets
             current_overall_margin = (gp / rev * 100) if (gp is not None and rev) else 0.0
@@ -1382,10 +1436,10 @@ class MetricsService:
                 gm_change = c_gm - p_gm
                 # 结构影响 = (当期毛利率 - 基期整体毛利率) × (当期收入占比 - 基期收入占比)
                 structure_impact = (c_gm - base_overall_margin) * (c_share - p_share) / 100
-                # 总影响 = 当期贡献度 - 基期贡献度 (保证求和 = 毛利率变化)
-                total_impact = c_share * c_gm / 100 - p_share * p_gm / 100
-                # 毛利影响 = 总影响 - 结构影响 (确保三项关系成立)
-                margin_impact = total_impact - structure_impact
+                # 毛利影响 = 基期收入占比 × (当期毛利率 - 基期毛利率)
+                margin_impact = p_share * gm_change / 100
+                # 合计 = 结构影响 + 毛利影响
+                total_impact = structure_impact + margin_impact
 
                 if category == "continuing":
                     margin_summary.continuing_structure_impact = (margin_summary.continuing_structure_impact or 0) + structure_impact
@@ -1411,29 +1465,10 @@ class MetricsService:
                     total_impact=_round(total_impact, 4),
                 ))
 
-            # Adjust total_impact so that sum = overall margin change
-            # (needed because zero-revenue items use overall margin as proxy,
-            # causing the contribution sum to deviate from actual margin change)
-            overall_margin_delta = current_overall_margin - base_overall_margin
-            raw_total_sum = sum(item.total_impact or 0 for item in margin_analysis)
-            if abs(raw_total_sum) > 1e-9 and abs(overall_margin_delta - raw_total_sum) > 1e-6:
-                adj = overall_margin_delta / raw_total_sum
-                for item in margin_analysis:
-                    raw_total = item.total_impact or 0
-                    new_total = raw_total * adj
-                    new_struct = item.structure_impact or 0
-                    new_margin = new_total - new_struct
-                    item.total_impact = _round(new_total, 4)
-                    item.margin_impact = _round(new_margin, 4)
-                # Recompute summary from adjusted items
-                margin_summary.continuing_structure_impact = sum(
-                    i.structure_impact or 0 for i in margin_analysis if i.category == "continuing")
-                margin_summary.continuing_margin_impact = sum(
-                    i.margin_impact or 0 for i in margin_analysis if i.category == "continuing")
-                margin_summary.new_impact = sum(
-                    i.total_impact or 0 for i in margin_analysis if i.category == "new")
-                margin_summary.exit_impact = sum(
-                    i.total_impact or 0 for i in margin_analysis if i.category == "exit")
+            # Note: Adjustment step removed to strictly follow formula: Total = Structure + Margin.
+            # Previously, total_impact was adjusted to sum to overall margin change, which broke the formula.
+            # Now, total_impact is strictly Structure + Margin as requested.
+            # margin_summary is recomputed from the items to ensure consistency.
 
             margin_analysis.sort(key=lambda item: item.total_impact or 0, reverse=True)
             summary.margin_change_analysis = margin_analysis

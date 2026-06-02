@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,7 +64,7 @@ class AuditLog(Base):
 class Notification(Base):
     __tablename__ = "notification"
     __table_args__ = (
-        Index("ix_notification_user_created", "user_id", "created_at", postgresql_ops={"created_at": "DESC"}),
+        Index("ix_notification_user_created", "user_id", text("created_at DESC")),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

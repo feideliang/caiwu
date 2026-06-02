@@ -43,6 +43,8 @@
               <a-select-option value="product_line">产品线</a-select-option>
               <a-select-option value="customer">客户</a-select-option>
             </a-select>
+            <!-- Customer filter (only when secondary dimension is customer) -->
+            <a-select v-if="secondaryDimension === 'customer'" v-model:value="selectedCustomer" :options="filteredCustomerOptions" style="width: 180px" placeholder="客户" allow-clear show-search @search="val => customerSearchValue = val" />
             <a-button type="primary" @click="refresh">刷新</a-button>
           </a-space>
         </template>
@@ -196,11 +198,19 @@ const selectedPeriod = ref<string | undefined>();
 const compareBase = ref<string>('yoy');
 const selectedDept = ref<string | undefined>();
 const secondaryDimension = ref<string>('product_line');
+const selectedCustomer = ref<string | undefined>();
 const customRange = ref<[any, any] | null>(null);
 const periodStart = ref<string | undefined>();
 const periodEnd = ref<string | undefined>();
 const allPeriods = ref<string[]>([]);
 const deptOptions = ref<Array<{ label: string; value: string }>>([]);
+const customerOptions = ref<Array<{ label: string; value: string }>>([]);
+const customerSearchValue = ref('');
+const filteredCustomerOptions = computed(() => {
+  if (!customerSearchValue.value) return customerOptions.value;
+  const kw = customerSearchValue.value.toLowerCase();
+  return customerOptions.value.filter(o => o.label.toLowerCase().includes(kw));
+});
 const loading = ref(false);
 const metricsData = ref<CoreMetricsResponse | null>(null);
 
@@ -418,6 +428,7 @@ async function fetchMetrics() {
     if (drillLevel.value === 0) {
       params.dimension = 'department';
       params.department = selectedDept.value;
+      params.customer = selectedCustomer.value;
     } else if (drillLevel.value === 1) {
       params.dimension = drillDim.value;
       params.department = drillDept.value;
@@ -451,6 +462,11 @@ async function fetchOptions() {
     const { data: deptResp } = await getFilterOptions({ dimension: 'department' });
     const depts = ((deptResp.data as any)?.options || []) as string[];
     deptOptions.value = depts.map((v) => ({ label: v, value: v }));
+    const { data: custResp } = await getFilterOptions({ dimension: 'customer' });
+    const custs = ((custResp.data as any)?.options || []) as any[];
+    customerOptions.value = custs.map((v: any) =>
+      typeof v === 'string' ? ({ label: v, value: v }) : v,
+    );
   } catch(err) {
     console.error('Failed to load filter options:', err);
   }
@@ -459,7 +475,7 @@ async function fetchOptions() {
 function refresh() { fetchMetrics(); }
 
 // Ignore filter changes when in drill mode
-watch([periodDimension, selectedPeriod, compareBase, selectedDept, periodStart, periodEnd], () => {
+watch([periodDimension, selectedPeriod, compareBase, selectedDept, selectedCustomer, periodStart, periodEnd], () => {
   if (drillLevel.value === 0) {
     fetchMetrics();
     loadRecommendations();

@@ -54,8 +54,6 @@ async def _build_kpis(
     customer: str | None = None,
     user: TokenPayload | None = None,
 ) -> dict:
-    from app.db.session import async_session_factory
-
     compare_mode = period_compare_type or "yoy"
 
     # Compute YoY period: subtract 1 year from the requested period string
@@ -77,30 +75,36 @@ async def _build_kpis(
     else:
         dim = "company"
 
-    # Helper to run metrics query with independent session
     bgbu_filter = (user.department if (user and user.role != "admin" and user.department) else "ALL")
 
-    async def _run_metrics(period_arg, compare_arg):
-        async with async_session_factory() as session:
-            return await MetricsService.get_core_metrics(
-                db=session,
-                period=period_arg,
-                dimension=dim,
-                compare=compare_arg,
-                period_dimension=period_dimension or "monthly",
-                period_start=period_start,
-                period_end=period_end,
-                product=product,
-                department=department,
-                customer=customer,
-                bgbu_filter=bgbu_filter,
-                sections={"summary", "trend_series"},
-            )
-
-    # Parallel execution with independent sessions
-    current, yoy = await asyncio.gather(
-        _run_metrics(period, compare_mode),
-        _run_metrics(yoy_period, "yo"),
+    # Sequential execution (shared db session cannot handle concurrent queries)
+    current = await MetricsService.get_core_metrics(
+        db=db,
+        period=period,
+        dimension=dim,
+        compare=compare_mode,
+        period_dimension=period_dimension or "monthly",
+        period_start=period_start,
+        period_end=period_end,
+        product=product,
+        department=department,
+        customer=customer,
+        bgbu_filter=bgbu_filter,
+        sections={"summary", "trend_series"},
+    )
+    yoy = await MetricsService.get_core_metrics(
+        db=db,
+        period=yoy_period,
+        dimension=dim,
+        compare="yo",
+        period_dimension=period_dimension or "monthly",
+        period_start=period_start,
+        period_end=period_end,
+        product=product,
+        department=department,
+        customer=customer,
+        bgbu_filter=bgbu_filter,
+        sections={"summary", "trend_series"},
     )
     summary = current.summary
     yoy_summary = yoy.summary
@@ -124,8 +128,8 @@ async def _build_kpis(
         "profit_cumulative": round(summary.gross_profit or 0, 2) if period_dimension == "cumulative" else 0.0,
         "revenue_cumulative_growth": round(summary.revenue_yoy_growth, 2) if (period_dimension == "cumulative" and summary.revenue_yoy_growth is not None) else None,
         "profit_cumulative_growth": round(summary.gross_profit_yoy_growth, 2) if (period_dimension == "cumulative" and summary.gross_profit_yoy_growth is not None) else None,
-        "revenue_consecutive_growth": summary.revenue_consecutive_growth if period_dimension != "monthly" else None,
-        "gross_profit_consecutive_growth": summary.gross_profit_consecutive_growth if period_dimension != "monthly" else None,
+        "revenue_consecutive_growth": (summary.revenue_consecutive_growth or 0) if period_dimension != "monthly" else None,
+        "gross_profit_consecutive_growth": (summary.gross_profit_consecutive_growth or 0) if period_dimension != "monthly" else None,
         "trend_series": [point.model_dump() for point in current.trend_series],
     }
 
@@ -141,31 +145,34 @@ async def _build_dimension_breakdowns(
     period_end: str | None = None,
     user: TokenPayload | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    from app.db.session import async_session_factory
-
     bgbu_filter = (user.department if (user and user.role != "admin" and user.department) else "ALL")
 
-    # Helper to run metrics query with independent session
-    async def _run_metrics(dimension_arg):
-        async with async_session_factory() as session:
-            return await MetricsService.get_core_metrics(
-                db=session,
-                period=period,
-                dimension=dimension_arg,
-                compare=period_compare_type or "yoy",
-                period_dimension=period_dimension or "monthly",
-                period_start=period_start,
-                period_end=period_end,
-                product=product,
-                department=department,
-                bgbu_filter=bgbu_filter,
-                sections={"breakdowns"},
-            )
-
-    # Parallel execution with independent sessions
-    dept_response, prod_response = await asyncio.gather(
-        _run_metrics("department"),
-        _run_metrics("product_line"),
+    # Sequential execution (shared db session cannot handle concurrent queries)
+    dept_response = await MetricsService.get_core_metrics(
+        db=db,
+        period=period,
+        dimension="department",
+        compare=period_compare_type or "yoy",
+        period_dimension=period_dimension or "monthly",
+        period_start=period_start,
+        period_end=period_end,
+        product=product,
+        department=department,
+        bgbu_filter=bgbu_filter,
+        sections={"breakdowns"},
+    )
+    prod_response = await MetricsService.get_core_metrics(
+        db=db,
+        period=period,
+        dimension="product_line",
+        compare=period_compare_type or "yoy",
+        period_dimension=period_dimension or "monthly",
+        period_start=period_start,
+        period_end=period_end,
+        product=product,
+        department=department,
+        bgbu_filter=bgbu_filter,
+        sections={"breakdowns"},
     )
     return (
         [item.model_dump() for item in dept_response.breakdowns],
@@ -324,30 +331,28 @@ async def _build_dashboard_response(body, db: AsyncSession, cache_key: str, user
             options=cc.get("config"),
         ))
 
-    # Parallel execution of KPIs and dimension breakdowns
-    kpis_result, (dept_items, prod_items) = await asyncio.gather(
-        _build_kpis(
-            db,
-            body.period_compare_type,
-            period_dimension=body.period_dimension,
-            period=body.period,
-            period_start=body.period_start,
-            period_end=body.period_end,
-            department=body.department,
-            product=body.product,
-            user=user,
-        ),
-        _build_dimension_breakdowns(
-            db,
-            department=body.department,
-            product=body.product,
-            period_compare_type=body.period_compare_type,
-            period_dimension=body.period_dimension,
-            period=body.period,
-            period_start=body.period_start,
-            period_end=body.period_end,
-            user=user,
-        ),
+    # Sequential execution of KPIs and dimension breakdowns (shared db session)
+    kpis_result = await _build_kpis(
+        db,
+        body.period_compare_type,
+        period_dimension=body.period_dimension,
+        period=body.period,
+        period_start=body.period_start,
+        period_end=body.period_end,
+        department=body.department,
+        product=body.product,
+        user=user,
+    )
+    dept_items, prod_items = await _build_dimension_breakdowns(
+        db,
+        department=body.department,
+        product=body.product,
+        period_compare_type=body.period_compare_type,
+        period_dimension=body.period_dimension,
+        period=body.period,
+        period_start=body.period_start,
+        period_end=body.period_end,
+        user=user,
     )
 
     response_data = DashboardBFFResponse(

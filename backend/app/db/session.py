@@ -15,9 +15,9 @@ engine = create_async_engine(
     echo=settings.debug,
     pool_pre_ping=True,
     pool_recycle=300,
-    pool_timeout=10,
-    pool_size=2,
-    max_overflow=3,
+    pool_timeout=30,
+    pool_size=20,
+    max_overflow=10,
     pool_use_lifo=True,
 )
 
@@ -46,9 +46,9 @@ sync_engine = create_engine(
     echo=settings.debug,
     pool_pre_ping=True,
     pool_recycle=300,
-    pool_timeout=10,
-    pool_size=2,
-    max_overflow=3,
+    pool_timeout=30,
+    pool_size=5,
+    max_overflow=5,
 )
 
 sync_session_factory = sessionmaker(sync_engine, class_=Session, expire_on_commit=False)

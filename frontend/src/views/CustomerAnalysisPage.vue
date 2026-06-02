@@ -332,7 +332,7 @@ async function loadRecommendations() {
       page_type: 'customer',
       period: period.value,
       period_compare_type: compareBase.value,
-      customer: customerParam,
+      ...(customerParam ? { customer: customerParam.trim() } : {}),
     });
     recommendations.value = data.data || undefined;
   } catch { /* non-critical */ }
@@ -369,8 +369,10 @@ async function fetchOptions() {
       selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
     }
     const { data: custResp } = await getFilterOptions({ dimension: 'customer' });
-    const customers = ((custResp.data as any)?.options || []) as string[];
-    customerOptions.value = customers.map((v) => ({ label: v, value: v }));
+    const customers = ((custResp.data as any)?.options || []) as any[];
+    customerOptions.value = customers.map((v: any) =>
+      typeof v === 'string' ? ({ label: v, value: v }) : v,
+    );
   } catch { /* interceptor handles errors */ }
 }
 

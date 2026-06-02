@@ -124,14 +124,15 @@ async def get_filter_options(
             else:
                 agg_type = dim_type_map[dimension]
                 if dimension == "customer":
-                    # Return 上级名称 (superior_name) for customer dropdown
+                    # Return objects with label=superior_name, value=customer (dim_value)
+                    # so the frontend shows 上级名称 but sends the actual customer name to API
                     imd_bgbu_cond = (
                         IncomeMarginDetail.bgbu == bgbu
                         if bgbu != "ALL"
                         else IncomeMarginDetail.bgbu != "ALL"
                     )
                     stmt = (
-                        select(IncomeMarginDetail.superior_name)
+                        select(IncomeMarginDetail.superior_name, IncomeMarginDetail.customer)
                         .where(imd_bgbu_cond)
                         .where(IncomeMarginDetail.superior_name.isnot(None))
                         .distinct()
@@ -149,7 +150,23 @@ async def get_filter_options(
                 col = stmt.selected_columns[0]
                 stmt = stmt.where(col.like(f"{prefix}%"))
             result = await db.execute(stmt)
-            options = [str(r[0]) for r in result.all() if r[0] is not None]
+            rows = result.all()
+            if dimension == "customer":
+                # Return { label: superior_name, value: customer } objects
+                options = [
+                    {"label": str(r[0]), "value": str(r[1])}
+                    for r in rows if r[0] is not None and r[1] is not None
+                ]
+                # Deduplicate by value (customer name), keep first superior_name
+                seen: set[str] = set()
+                deduped: list[dict[str, str]] = []
+                for o in options:
+                    if o["value"] not in seen:
+                        seen.add(o["value"])
+                        deduped.append(o)
+                options = deduped
+            else:
+                options = [str(r[0]) for r in rows if r[0] is not None]
             return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})
 
         # Unknown dimension

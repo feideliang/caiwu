@@ -37,6 +37,17 @@ async def get_core_metrics(
     elif department:
         bgbu_filter = department
 
+    # Map generic entity to dimension-specific param
+    if entity:
+        if dimension == 'customer' and not customer:
+            customer = entity
+        elif dimension == 'sales_product' and not customer:
+            customer = entity
+        elif dimension == 'product_line' and not product:
+            product = entity
+        elif dimension == 'department' and not department:
+            department = entity
+
     result = await MetricsService.get_core_metrics(
         db=db,
         period=period,

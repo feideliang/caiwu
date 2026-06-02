@@ -601,7 +601,15 @@ def build_analysis_recommendations(
             MetricRecommendation(
                 metric_name="产品线毛利率", metric_key="product_gross_margin",
                 description="各产品线盈利能力",
+                current_value=kpis.get("gross_margin"),
                 recommendation="关注低毛利产品线"
+            ),
+            MetricRecommendation(
+                metric_name="收入同比", metric_key="revenue_yoy_growth",
+                description="收入同比变化",
+                current_value=kpis.get("revenue_yoy_growth"),
+                status="warning" if (kpis.get("revenue_yoy_growth") or 0) < -10 else "normal",
+                recommendation="收入同比下降需关注" if (kpis.get("revenue_yoy_growth") or 0) < -10 else "收入增长正常"
             ),
             MetricRecommendation(
                 metric_name="负毛利产品占比", metric_key="negative_margin_product_ratio",
@@ -1373,9 +1381,9 @@ async def get_analysis_recommendations(
         bgbu_filter = user.department
 
     # Fetch current KPI data
-    dept_param = body.department if body.department else None
-    prod_param = body.product if body.product else None
-    cust_param = body.customer if body.customer else None
+    dept_param = body.department.strip() if body.department else None
+    prod_param = body.product.strip() if body.product else None
+    cust_param = body.customer.strip() if body.customer else None
 
     kpis = await _build_kpis(
         db,

@@ -58,7 +58,7 @@
             <!-- Dimension selector -->
             <a-select v-model:value="dimension" :options="dimensionOptions" style="width: 140px" placeholder="维度" />
             <!-- Entity selector -->
-            <a-select v-if="dimension !== 'company' && !(dimension === 'department' && authStore.isDeptRestricted)" v-model:value="selectedEntity" :options="entityOptions" style="width: 180px" placeholder="实体" allow-clear />
+            <a-select v-if="dimension !== 'company' && !(dimension === 'department' && authStore.isDeptRestricted)" v-model:value="selectedEntity" :options="filteredEntityOptions" style="width: 180px" placeholder="实体" allow-clear show-search @search="val => entitySearchValue = val" />
             <a-tag v-if="dimension === 'department' && authStore.isDeptRestricted" color="blue">{{ authStore.department }}</a-tag>
             <!-- Show active department scope filter -->
             <a-tag v-if="departmentScope && dimension !== 'department' && dimension !== 'company'" color="orange" closable @close="departmentScope = undefined">部门: {{ departmentScope }}</a-tag>
@@ -301,6 +301,12 @@ const periodStart = ref<string | undefined>();
 const periodEnd = ref<string | undefined>();
 const allPeriods = ref<string[]>([]);
 const entityOptions = ref<Array<{ label: string; value: string }>>([]);
+const entitySearchValue = ref('');
+const filteredEntityOptions = computed(() => {
+  if (!entitySearchValue.value) return entityOptions.value;
+  const kw = entitySearchValue.value.toLowerCase();
+  return entityOptions.value.filter(o => o.label.toLowerCase().includes(kw));
+});
 
 // Cross-dimension analysis
 const crossDimension = ref<string>('');
@@ -538,24 +544,24 @@ function computeTopImpacts(
     return {
       name: b.dimension_value,
       change: change / 10000,
-      absChange: Math.abs(change),
     };
-  }).filter((i) => i.absChange > 0).sort((a, b) => b.absChange - a.absChange);
+  }).filter((i) => i.change !== 0).sort((a, b) => b.change - a.change);
 
   if (!impacts.length) return [];
 
-  // Use breakdown-level total change as denominator, not summary total
-  const breakdownTotalChange = impacts.reduce((s, i) => s + i.absChange, 0);
-  if (breakdownTotalChange === 0) return [];
+  // Denominator: net total change (sum of all changes, not absolute)
+  // This gives each item's contribution share to the overall change
+  const totalNetChange = impacts.reduce((s, i) => s + i.change, 0);
+  if (totalNetChange === 0) return [];
 
   const withPct = impacts.map((i) => ({
     name: i.name,
     change: i.change,
-    pct: Math.round((i.absChange / breakdownTotalChange) * 100),
+    pct: Math.round((i.change / totalNetChange) * 100),
   }));
 
-  let cumPct = 0;
-  return withPct.filter((i) => { cumPct += i.pct; return cumPct <= 100 || i === withPct[0]; });
+  let cumAbsPct = 0;
+  return withPct.filter((i) => { cumAbsPct += Math.abs(i.pct); return cumAbsPct <= 100 || i === withPct[0]; });
 }
 
 const revenueTopImpacts = computed(() => {
@@ -715,8 +721,11 @@ async function loadEntityOptions() {
     params.department = departmentScope.value;
   }
   const { data: resp } = await getFilterOptions(params);
-  const opts = ((resp.data as any)?.options || []) as string[];
-  entityOptions.value = opts.map((v) => ({ label: v, value: v }));
+  const opts = ((resp.data as any)?.options || []) as any[];
+  // API may return strings (other dimensions) or {label, value} objects (customer dimension)
+  entityOptions.value = opts.map((v: any) =>
+    typeof v === 'string' ? ({ label: v, value: v }) : v,
+  );
   selectedEntity.value = undefined;
 }
 

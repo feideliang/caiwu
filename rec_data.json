@@ -1,0 +1,222 @@
+{
+  "总览驾驶舱(Dashboard)": {
+    "page_type": "dashboard",
+    "summary": "整体盈利能力良好，可关注增长机会",
+    "metrics": [
+      {
+        "metric_name": "营业收入",
+        "metric_key": "revenue",
+        "description": "本期总收入",
+        "current_value": 139169.174708,
+        "benchmark": null,
+        "status": "normal",
+        "recommendation": "关注收入规模及同比变化"
+      },
+      {
+        "metric_name": "毛利率",
+        "metric_key": "gross_margin",
+        "description": "毛利占收入比",
+        "current_value": 36.76,
+        "benchmark": 25.0,
+        "status": "normal",
+        "recommendation": "毛利率处于正常水平"
+      },
+      {
+        "metric_name": "客户集中度Top10",
+        "metric_key": "customer_concentration_top10",
+        "description": "前10大客户收入占比",
+        "current_value": 0.0,
+        "benchmark": 50.0,
+        "status": "normal",
+        "recommendation": "客户分布健康"
+      }
+    ],
+    "suggested_questions": [
+      "总结本月经营情况",
+      "毛利率是否正常",
+      "哪些指标出现异常"
+    ],
+    "anomalies": [],
+    "drill_down_path": [
+      "趋势分析",
+      "部门分析",
+      "产品分析"
+    ]
+  },
+  "趋势分析": {
+    "page_type": "trend",
+    "summary": "整体盈利能力良好，可关注增长机会",
+    "metrics": [
+      {
+        "metric_name": "收入同比",
+        "metric_key": "revenue_yoy_growth",
+        "description": "收入同比增长率",
+        "current_value": 12.86,
+        "benchmark": null,
+        "status": "normal",
+        "recommendation": "收入增长趋势良好"
+      },
+      {
+        "metric_name": "毛利额同比",
+        "metric_key": "profit_yoy_growth",
+        "description": "毛利额同比增长率",
+        "current_value": 24.77,
+        "benchmark": null,
+        "status": "normal",
+        "recommendation": "毛利增长与收入增长是否匹配"
+      },
+      {
+        "metric_name": "毛利率变动",
+        "metric_key": "gross_margin_yoy_change",
+        "description": "毛利率同比变化(百分点)",
+        "current_value": 3.51,
+        "benchmark": null,
+        "status": "normal",
+        "recommendation": "关注毛利率持续下滑趋势"
+      }
+    ],
+    "suggested_questions": [
+      "收入趋势是否可持续",
+      "环比波动是否异常"
+    ],
+    "anomalies": [],
+    "drill_down_path": [
+      "部门维度趋势",
+      "产品维度趋势"
+    ]
+  },
+  "部门分析": {
+    "page_type": "department",
+    "summary": "整体盈利能力良好，可关注增长机会",
+    "metrics": [
+      {
+        "metric_name": "部门收入贡献",
+        "metric_key": "department_revenue",
+        "description": "各部门收入拆解",
+        "current_value": null,
+        "benchmark": null,
+        "status": "normal",
+        "recommendation": "关注收入贡献最高的部门"
+      },
+      {
+        "metric_name": "负毛利部门",
+        "metric_key": "negative_margin_department",
+        "description": "是否存在负毛利部门",
+        "current_value": null,
+        "benchmark": null,
+        "status": "normal",
+        "recommendation": "有部门毛利为负需立即关注"
+      }
+    ],
+    "suggested_questions": [
+      "供应链管理部毛利率为何偏低",
+      "哪个部门贡献最高",
+      "各部门增长趋势如何"
+    ],
+    "anomalies": [],
+    "drill_down_path": [
+      "客户维度",
+      "产品维度"
+    ]
+  },
+  "产品分析": {
+    "page_type": "product",
+    "summary": "整体盈利能力良好，可关注增长机会",
+    "metrics": [
+      {
+        "metric_name": "产品线毛利率",
+        "metric_key": "product_gross_margin",
+        "description": "各产品线盈利能力",
+        "current_value": null,
+        "benchmark": null,
+        "status": "normal",
+        "recommendation": "关注低毛利产品线"
+      },
+      {
+        "metric_name": "负毛利产品占比",
+        "metric_key": "negative_margin_product_ratio",
+        "description": "负毛利产品数量占比",
+        "current_value": null,
+        "benchmark": null,
+        "status": "normal",
+        "recommendation": ""
+      }
+    ],
+    "suggested_questions": [
+      "哪个产品线风险最大",
+      "产品毛利率变化原因",
+      "为什么制造事业部毛利为负"
+    ],
+    "anomalies": [],
+    "drill_down_path": [
+      "销售产品下钻",
+      "客户维度"
+    ]
+  },
+  "客户分析": {
+    "page_type": "customer",
+    "summary": "整体盈利能力良好，可关注增长机会",
+    "metrics": [
+      {
+        "metric_name": "客户集中度",
+        "metric_key": "customer_concentration",
+        "description": "客户收入集中度",
+        "current_value": 0.0,
+        "benchmark": 50.0,
+        "status": "normal",
+        "recommendation": ""
+      },
+      {
+        "metric_name": "单客户最高占比",
+        "metric_key": "top_customer_share",
+        "description": "单一最大客户收入占比",
+        "current_value": null,
+        "benchmark": 30.0,
+        "status": "normal",
+        "recommendation": ""
+      }
+    ],
+    "suggested_questions": [
+      "抖音集团(香港)有限公司占比过高是否有风险"
+    ],
+    "anomalies": [],
+    "drill_down_path": [
+      "销售产品维度",
+      "合同类型"
+    ]
+  },
+  "核心指标(变动分析)": {
+    "page_type": "core_metrics",
+    "summary": "整体盈利能力良好，可关注增长机会",
+    "metrics": [
+      {
+        "metric_name": "高毛利订单占比",
+        "metric_key": "high_margin_order_ratio",
+        "description": "毛利率>40%的订单比例",
+        "current_value": null,
+        "benchmark": 50.0,
+        "status": "normal",
+        "recommendation": "高毛利订单占比反映业务质量"
+      },
+      {
+        "metric_name": "负毛利订单占比",
+        "metric_key": "negative_margin_order_ratio",
+        "description": "毛利为负的订单比例",
+        "current_value": 0.0,
+        "benchmark": null,
+        "status": "normal",
+        "recommendation": ""
+      }
+    ],
+    "suggested_questions": [
+      "核心指标达标情况如何",
+      "毛利率变化的结构和率影响拆解",
+      "客户集中度风险如何"
+    ],
+    "anomalies": [],
+    "drill_down_path": [
+      "交易明细",
+      "异常订单"
+    ]
+  }
+}

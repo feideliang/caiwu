@@ -31,6 +31,7 @@
         :dimension="dimension"
         :entity="selectedEntity"
         :compare="compare"
+        :period-dimension="periodDimension"
       />
 
       <a-card :title="chartTitle" size="small" class="section">
@@ -119,6 +120,14 @@ const compareOptions = [
   { label: '累计', value: 'cumulative' },
 ];
 
+/** periodDimension is derived from compare mode:
+ *  'cumulative' compare → 'cumulative' period dim
+ *  'mom'/'yoy' compare  → 'monthly' period dim
+ */
+const periodDimension = computed(() =>
+  compare.value === 'cumulative' ? 'cumulative' : 'monthly'
+);
+
 const breakdowns = computed<BreakdownItem[]>(() => metricsData.value?.breakdowns || []);
 
 const chartData = computed<Record<string, unknown>[]>(() => {
@@ -143,6 +152,7 @@ const assistantContext = computed(() => ({
   department: props.activeSection === 'department' ? selectedEntity.value : undefined,
   product: props.activeSection === 'product' ? selectedEntity.value : undefined,
   period_compare_type: compare.value,
+  period_dimension: periodDimension.value,
   active_section: props.activeSection,
 }));
 
@@ -154,6 +164,7 @@ async function fetchMetrics() {
       dimension: props.dimension,
       entity: selectedEntity.value,
       compare: compare.value,
+      period_dimension: periodDimension.value,
     });
     metricsData.value = resp.data as CoreMetricsResponse;
   } finally {

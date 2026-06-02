@@ -353,11 +353,17 @@ const recommendations = ref<AnalysisRecommendations>();
 
 async function loadRecommendations() {
   try {
+    const productVal = drillMode.value ? drillProduct.value : selectedProduct.value;
+    // Skip if no product selected (fallback would show company-level data, misleading)
+    if (!productVal || !productVal.trim()) {
+      recommendations.value = undefined;
+      return;
+    }
     const { data } = await getAnalysisRecommendations({
       page_type: 'product',
       period: period.value,
       period_compare_type: compareBase.value,
-      product: drillMode.value ? drillProduct.value : selectedProduct.value,
+      product: productVal.trim(),
     });
     recommendations.value = data.data || undefined;
   } catch { /* non-critical */ }

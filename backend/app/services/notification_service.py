@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-import math
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ResourceNotFoundError
@@ -32,14 +31,7 @@ class NotificationService:
     ) -> tuple[list[dict], int, int]:
         """List notifications for a user. Returns (items, total, unread_count)."""
 
-        base = select(Notification).where(Notification.user_id == user_id)
-
-        if notification_type:
-            base = base.where(Notification.notification_type == notification_type)
-        if is_read is not None:
-            base = base.where(Notification.is_read == is_read)
-
-        # Unread count (independent of pagination filters)
+        # Unread count — always counts all unread for this user, ignoring type/read filters
         unread_stmt = select(func.count()).where(
             Notification.user_id == user_id,
             Notification.is_read == False,  # noqa: E712
@@ -47,14 +39,27 @@ class NotificationService:
         unread_result = await db.execute(unread_stmt)
         unread_count = unread_result.scalar_one()
 
-        # Total count with filters
-        base_ordered = base.order_by(Notification.created_at.desc())
-        count_stmt = select(func.count()).select_from(base_ordered.subquery())
-        total_result = await db.execute(count_stmt)
+        # Build predicates for filtered count + data query
+        predicates = [Notification.user_id == user_id]
+        if notification_type:
+            predicates.append(Notification.notification_type == notification_type)
+        if is_read is not None:
+            predicates.append(Notification.is_read == is_read)
+
+        # Total count — direct count, no subquery, no ordering
+        total_result = await db.execute(
+            select(func.count()).where(and_(*predicates))
+        )
         total = total_result.scalar_one()
 
-        # Paginate
-        stmt = base_ordered.offset((page - 1) * page_size).limit(page_size)
+        # Paginated data
+        stmt = (
+            select(Notification)
+            .where(and_(*predicates))
+            .order_by(Notification.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
         result = await db.execute(stmt)
         notifications = result.scalars().all()
 

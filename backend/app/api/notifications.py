@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import math
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,7 +35,7 @@ async def list_notifications(
         notification_type=notification_type,
         is_read=is_read,
     )
-    total_pages = math.ceil(total / page_size) if total else 0
+    total_pages = (total + page_size - 1) // page_size if total else 0
 
     return APIResponse.success(
         data=NotificationListResponse(
