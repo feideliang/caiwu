@@ -153,10 +153,13 @@ async def get_filter_options(
             rows = result.all()
             if dimension == "customer":
                 # Return { label: superior_name, value: customer } objects
-                options = [
-                    {"label": str(r[0]), "value": str(r[1])}
-                    for r in rows if r[0] is not None and r[1] is not None
-                ]
+                # When customer is NULL, use superior_name as value
+                options = []
+                for r in rows:
+                    label = str(r[0]) if r[0] is not None else None
+                    value = str(r[1]) if r[1] is not None else label
+                    if label:
+                        options.append({"label": label, "value": value})
                 # Deduplicate by value (customer name), keep first superior_name
                 seen: set[str] = set()
                 deduped: list[dict[str, str]] = []
