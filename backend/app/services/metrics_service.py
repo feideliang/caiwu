@@ -229,12 +229,13 @@ class MetricsService:
         # ── Cache check: data updates once per day, cache 24h ──
         _sections_key = ",".join(sorted(sections)) if sections else "all"
         _cache_key = f"metrics:core:v2:{period}:{dimension}:{compare}:{period_dimension}:{product}:{department}:{customer}:{bgbu_filter}:{_sections_key}"
-        try:
-            _cached = await cache_get(_cache_key)
-            if _cached is not None:
-                return CoreMetricsResponse(**_cached)
-        except Exception:
-            pass
+        # CACHE DISABLED FOR PERFORMANCE TESTING
+        # try:
+        #     _cached = await cache_get(_cache_key)
+        #     if _cached is not None:
+        #         return CoreMetricsResponse(**_cached)
+        # except Exception:
+        #     pass
 
         all_periods = await MetricsService._list_periods(db, bgbu_filter=bgbu_filter, limit=36)
         period_dimension = _normalize_period_dimension(period_dimension)
@@ -1644,10 +1645,10 @@ class MetricsService:
             ),
         )
 
-        # ── Cache the result for 24 hours (data updates ~once per day) ──
-        try:
-            await cache_set(_cache_key, _response.model_dump(mode="json"), ttl=86400)
-        except Exception:
-            pass
+        # ── Cache DISABLED for performance testing ──
+        # try:
+        #     await cache_set(_cache_key, _response.model_dump(mode="json"), ttl=86400)
+        # except Exception:
+        #     pass
 
         return _response
