@@ -577,23 +577,16 @@ class MetricsService:
                     .group_by(IncomeMarginDetail.period, IncomeMarginDetail.superior_name)
                 )
                 cust_imd_rows = (await db.execute(cust_imd_q)).all()
+                # Accumulate per-customer data and compute totals in one pass
+                period_totals: dict[str, float] = {}
                 for row in cust_imd_rows:
                     period_customer_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
                     period_customer_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
                     period_customer_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
                     period_customer_rev[row[0]][row[1]] += float(row[2] or 0)
-                # Compute totals
-                total_q_imd = (
-                    select(IncomeMarginDetail.period, func.sum(IncomeMarginDetail.revenue_amount))
-                    .where(
-                        IncomeMarginDetail.period.in_(list(detail_periods)),
-                        imd_bgbu_cond,
-                        IncomeMarginDetail.product_bgbu == product,
-                    )
-                    .group_by(IncomeMarginDetail.period)
-                )
-                for period_val, total_rev in (await db.execute(total_q_imd)).all():
-                    period_customer_rev[period_val]["__total__"] = float(total_rev or 0)
+                    period_totals[row[0]] = period_totals.get(row[0], 0) + float(row[2] or 0)
+                for period_val, total_rev in period_totals.items():
+                    period_customer_rev[period_val]["__total__"] = total_rev
             else:
                 total_q = (
                     select(AggDimensionSummary.period, func.sum(AggDimensionSummary.revenue))
