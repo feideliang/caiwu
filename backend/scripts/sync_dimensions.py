@@ -74,7 +74,7 @@ ON CONFLICT (customer_name) DO UPDATE SET
 UPSERT_PRODUCT = """
 INSERT INTO dim_product (
     product_code, product_name, category, classification,
-    bu_code, bu_name, bgbu, org, series, product_line, family,
+    bu_code, bu_name, bgbu, org, series, product_bgbu, family,
     material_code, material_desc, material_cost_category,
     first_seen_period, last_seen_period
 )
@@ -85,10 +85,10 @@ SELECT
     MIN(w.product_classification) AS classification,
     MIN(w.product_bu_code) AS bu_code,
     MIN(w.product_bu_name) AS bu_name,
-    MIN(w.product_line) AS bgbu,
+    MIN(w.product_bgbu) AS bgbu,
     MIN(w.product_org) AS org,
     MIN(w.series) AS series,
-    MIN(w.product_line) AS product_line,
+    MIN(w.product_bgbu) AS product_bgbu,
     MIN(w.product_family) AS family,
     MIN(w.material_code) AS material_code,
     MIN(w.material_desc) AS material_desc,
@@ -107,7 +107,7 @@ ON CONFLICT (product_code) DO UPDATE SET
     bgbu                     = EXCLUDED.bgbu,
     org                      = EXCLUDED.org,
     series                   = EXCLUDED.series,
-    product_line             = EXCLUDED.product_line,
+    product_bgbu             = EXCLUDED.product_bgbu,
     family                   = EXCLUDED.family,
     material_code            = EXCLUDED.material_code,
     material_desc            = EXCLUDED.material_desc,

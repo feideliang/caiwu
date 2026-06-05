@@ -157,7 +157,7 @@ def main():
                     "metric_unit": "count",
                     "period": period,
                     "entity": product,
-                    "tags_val": json.dumps({"product_line": product}),
+                    "tags_val": json.dumps({"product_bgbu": product}),
                     "raw_row_val": json.dumps({"mock_source": MOCK_TAG, "note": f"{product} loss count for {period}"}),
                 })
 
@@ -167,7 +167,7 @@ def main():
                     "metric_unit": "count",
                     "period": period,
                     "entity": product,
-                    "tags_val": json.dumps({"product_line": product}),
+                    "tags_val": json.dumps({"product_bgbu": product}),
                     "raw_row_val": json.dumps({"mock_source": MOCK_TAG, "note": f"{product} total count for {period}"}),
                 })
 

@@ -261,7 +261,7 @@ class MetricsService:
                 entity=entity,
                 summary=CoreMetricsSummary(),
                 breakdowns=[],
-                product_line_breakdown=[],
+                product_bgbu_breakdown=[],
                 customer_breakdown=[],
                 contract_type_breakdown=[],
                 data_quality=DataQuality(
@@ -412,12 +412,12 @@ class MetricsService:
         if need_summary or need_trend:
             if product:
                 # Product filter: query IncomeMarginDetail
-                # Match by product_line or sales_product_name
+                # Match by product_bgbu or sales_product_name
                 ps_imd_filters = [
                     IncomeMarginDetail.period.in_(list(_trend_period_pool)),
                     imd_bgbu_cond,
                     or_(
-                        IncomeMarginDetail.product_line == product,
+                        IncomeMarginDetail.product_bgbu == product,
                         IncomeMarginDetail.sales_product_name == product,
                     ),
                 ]
@@ -533,7 +533,7 @@ class MetricsService:
                             IncomeMarginDetail.period.in_(list(detail_periods)),
                             imd_bgbu_cond,
                             or_(
-                                IncomeMarginDetail.product_line == product,
+                                IncomeMarginDetail.product_bgbu == product,
                                 IncomeMarginDetail.sales_product_name == product,
                             ),
                         )
@@ -545,11 +545,11 @@ class MetricsService:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["cost"] += float(row[3] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
                 elif customer and dimension == 'product_line':
-                    # Customer filter on product_line dimension: query IncomeMarginDetail by superior_name, group by product_line
+                    # Customer filter on product_line dimension: query IncomeMarginDetail by superior_name, group by product_bgbu
                     imd_pl_cust_q = (
                         select(
                             IncomeMarginDetail.period,
-                            IncomeMarginDetail.product_line,
+                            IncomeMarginDetail.product_bgbu,
                             func.sum(IncomeMarginDetail.revenue_amount).label("revenue"),
                             func.sum(IncomeMarginDetail.cost_amount).label("cost"),
                             func.sum(IncomeMarginDetail.gross_profit_amount).label("gross_profit"),
@@ -559,7 +559,7 @@ class MetricsService:
                             imd_bgbu_cond,
                             IncomeMarginDetail.superior_name == customer,
                         )
-                        .group_by(IncomeMarginDetail.period, IncomeMarginDetail.product_line)
+                        .group_by(IncomeMarginDetail.period, IncomeMarginDetail.product_bgbu)
                     )
                     imd_pl_cust_rows = (await db.execute(imd_pl_cust_q)).all()
                     for row in imd_pl_cust_rows:
@@ -568,11 +568,11 @@ class MetricsService:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
                 elif product and dimension == 'product_line':
                     # Product filter on product_line dimension: query IncomeMarginDetail directly
-                    # AggDimensionSummary.dim_value may not match IncomeMarginDetail.product_line
+                    # AggDimensionSummary.dim_value may not match IncomeMarginDetail.product_bgbu
                     imd_pl_q = (
                         select(
                             IncomeMarginDetail.period,
-                            IncomeMarginDetail.product_line,
+                            IncomeMarginDetail.product_bgbu,
                             func.sum(IncomeMarginDetail.revenue_amount).label("revenue"),
                             func.sum(IncomeMarginDetail.cost_amount).label("cost"),
                             func.sum(IncomeMarginDetail.gross_profit_amount).label("gross_profit"),
@@ -581,10 +581,10 @@ class MetricsService:
                         .where(
                             IncomeMarginDetail.period.in_(list(detail_periods)),
                             imd_bgbu_cond,
-                            IncomeMarginDetail.product_line == product,
-                            IncomeMarginDetail.product_line.isnot(None),
+                            IncomeMarginDetail.product_bgbu == product,
+                            IncomeMarginDetail.product_bgbu.isnot(None),
                         )
-                        .group_by(IncomeMarginDetail.period, IncomeMarginDetail.product_line)
+                        .group_by(IncomeMarginDetail.period, IncomeMarginDetail.product_bgbu)
                     )
                     imd_pl_rows = (await db.execute(imd_pl_q)).all()
                     for row in imd_pl_rows:
@@ -667,7 +667,7 @@ class MetricsService:
         elif (need_customer_bd or need_summary) and not _is_customer_dim:
             if product:
                 # Product filter active: query customer revenue from IncomeMarginDetail
-                # which has both customer (superior_name) and product (product_line) fields.
+                # which has both customer (superior_name) and product (product_bgbu) fields.
                 # AggDimensionSummary for customer doesn't have product linkage.
                 cust_imd_q = (
                     select(
@@ -681,8 +681,8 @@ class MetricsService:
                         IncomeMarginDetail.period.in_(list(detail_periods)),
                         imd_bgbu_cond,
                         or_(
-                            IncomeMarginDetail.product_line == product,
-                            IncomeMarginDetail.product_line == product,
+                            IncomeMarginDetail.product_bgbu == product,
+                            IncomeMarginDetail.product_bgbu == product,
                             IncomeMarginDetail.sales_product_name == product,
                         ),
                         IncomeMarginDetail.superior_name.isnot(None),
@@ -1704,7 +1704,7 @@ class MetricsService:
             ))
 
         # ── Product line breakdown (query product_line dim_type directly) ─
-        product_line_breakdown: list[BreakdownItem] = []
+        product_bgbu_breakdown: list[BreakdownItem] = []
         if need_breakdowns or need_summary:
             pl_q = select(
                 AggDimensionSummary.dim_value,
@@ -1726,7 +1726,7 @@ class MetricsService:
                     p_gm = _safe_div(p_gp, p_rev) * 100 if p_rev else None
                     p_contrib = _safe_div(p_gp, total_pl_rev) * 100 if total_pl_rev else None
                     p_rev_contrib = _safe_div(p_rev, total_pl_rev) * 100 if total_pl_rev else None
-                    product_line_breakdown.append(BreakdownItem(
+                    product_bgbu_breakdown.append(BreakdownItem(
                         dimension_value=pl_name,
                         revenue=_round(p_rev),
                         tax_excluded_cost=_round(p_cost),
@@ -1768,7 +1768,7 @@ class MetricsService:
             entity=entity,
             summary=summary,
             breakdowns=breakdowns,
-            product_line_breakdown=product_line_breakdown,
+            product_bgbu_breakdown=product_bgbu_breakdown,
             customer_breakdown=customer_breakdown,
             contract_type_breakdown=contract_type_breakdown,
             trend_series=trend,

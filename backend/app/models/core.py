@@ -214,7 +214,7 @@ class IncomeMarginDetail(Base):
     product_bgbu_value: Mapped[str | None] = mapped_column(String(128), name="product_bgbu")
     product_org: Mapped[str | None] = mapped_column(String(256))
     series: Mapped[str | None] = mapped_column(String(256))
-    product_line: Mapped[str | None] = mapped_column(String(256))
+    product_bgbu: Mapped[str | None] = mapped_column(String(256), name="product_line")
     product_family: Mapped[str | None] = mapped_column(String(256))
     sales_product_code: Mapped[str | None] = mapped_column(String(128))
     sales_product_name: Mapped[str | None] = mapped_column(String(256))

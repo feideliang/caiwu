@@ -217,7 +217,7 @@ const metricsData = ref<CoreMetricsResponse | null>(null);
 // Drill-down state
 const drillLevel = ref(0);  // 0=部门总览, 1=产品线/客户, 2=销售产品
 const drillDept = ref<string>();
-const drillDim = ref<'product_line' | 'customer'>();
+const drillDim = ref<'product_bgbu' | 'customer'>();
 const drillEntity = ref<string>();
 const drillModalVisible = ref(false);
 const drillPendingName = ref<string>();
@@ -387,7 +387,7 @@ function onChartClick(name: string) {
   // Level 2 has no further drill
 }
 
-function confirmDrillDim(dim: 'product_line' | 'customer') {
+function confirmDrillDim(dim: 'product_bgbu' | 'customer') {
   drillModalVisible.value = false;
   drillLevel.value = 1;
   drillDept.value = drillPendingName.value;

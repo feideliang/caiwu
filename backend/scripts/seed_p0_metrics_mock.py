@@ -299,7 +299,7 @@ def main():
                             # Existing tags (14)
                             "customer": customer_name,
                             "customer_name": customer_name,
-                            "product_line": product_name,
+                            "product_bgbu": product_name,
                             "product": product_name,
                             "order_id": order_id,
                             "contract_no": contract_no,

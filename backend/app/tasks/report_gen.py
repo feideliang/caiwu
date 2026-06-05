@@ -247,7 +247,7 @@ def _ai_analyze(report_id: int, data: dict) -> dict:
 
     Produces a standardized four-part report structure:
     1. 总体业绩概览 — core KPIs (revenue, gross profit, margin, achievement)
-    2. 多维下钻分析 — department, product_line, customer breakdowns
+    2. 多维下钻分析 — department, product_bgbu, customer breakdowns
     3. 根本原因总结 — AI-analyzed change drivers
     4. 具体业务建议 — sales, pricing, product strategy, CRM recommendations
     """

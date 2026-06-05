@@ -16,7 +16,7 @@ engine = create_engine(DB_URL)
 
 with engine.connect() as conn:
     r = conn.execute(text("""
-        SELECT DISTINCT tags->>'product_line'
+        SELECT DISTINCT tags->>'product_bgbu'
         FROM financial_data
         WHERE metric_name = 'revenue' AND period LIKE '2026-%'
         ORDER BY 1
@@ -26,10 +26,10 @@ with engine.connect() as conn:
         print(f"  {row[0]}")
 
     r2 = conn.execute(text("""
-        SELECT tags->>'product_line', COUNT(*), SUM(metric_value)
+        SELECT tags->>'product_bgbu', COUNT(*), SUM(metric_value)
         FROM financial_data
         WHERE metric_name = 'revenue' AND period LIKE '2026-%'
-        GROUP BY tags->>'product_line'
+        GROUP BY tags->>'product_bgbu'
         ORDER BY 3 DESC
     """))
     print("\n=== Revenue by product_line (2026) ===")

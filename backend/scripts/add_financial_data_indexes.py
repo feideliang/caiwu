@@ -43,9 +43,9 @@ INDEXES = [
         "ON financial_data ((tags->>'department'))",
     ),
     (
-        "idx_financial_data_tags_product_line",
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_financial_data_tags_product_line "
-        "ON financial_data ((tags->>'product_line'))",
+        "idx_financial_data_tags_product_bgbu",
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_financial_data_tags_product_bgbu "
+        "ON financial_data ((tags->>'product_bgbu'))",
     ),
     (
         "idx_financial_data_tags_customer",

@@ -44,7 +44,7 @@ class DimProduct(Base):
     bgbu: Mapped[str | None] = mapped_column(String(128))
     org: Mapped[str | None] = mapped_column(String(256))
     series: Mapped[str | None] = mapped_column(String(256))
-    product_line: Mapped[str | None] = mapped_column(String(256))
+    product_bgbu: Mapped[str | None] = mapped_column(String(256))
     family: Mapped[str | None] = mapped_column(String(256))
     material_code: Mapped[str | None] = mapped_column(String(128))
     material_desc: Mapped[str | None] = mapped_column(Text)

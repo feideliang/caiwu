@@ -81,19 +81,19 @@ GROUP BY period
 
 AGG_DIMENSION = """
 INSERT INTO agg_dimension_summary (period, bgbu, dim_type, dim_value, revenue, cost, gross_profit, order_count)
-SELECT period, bgbu, 'product_line', product_line,
+SELECT period, bgbu, 'product_line', product_bgbu,
     COALESCE(SUM(revenue_amount),0), COALESCE(SUM(cost_amount),0),
     COALESCE(SUM(gross_profit_amount),0),
     COUNT(DISTINCT COALESCE(order_id, contract_no))
-FROM income_margin_detail WHERE bgbu IS NOT NULL AND product_line IS NOT NULL
-GROUP BY period, bgbu, product_line
+FROM income_margin_detail WHERE bgbu IS NOT NULL AND product_bgbu IS NOT NULL
+GROUP BY period, bgbu, product_bgbu
 UNION ALL
-SELECT period, 'ALL', 'product_line', product_line,
+SELECT period, 'ALL', 'product_line', product_bgbu,
     COALESCE(SUM(revenue_amount),0), COALESCE(SUM(cost_amount),0),
     COALESCE(SUM(gross_profit_amount),0),
     COUNT(DISTINCT COALESCE(order_id, contract_no))
-FROM income_margin_detail WHERE product_line IS NOT NULL
-GROUP BY period, product_line
+FROM income_margin_detail WHERE product_bgbu IS NOT NULL
+GROUP BY period, product_bgbu
 UNION ALL
 SELECT period, bgbu, 'sales_product', sales_product_name,
     COALESCE(SUM(revenue_amount),0), COALESCE(SUM(cost_amount),0),

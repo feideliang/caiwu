@@ -87,7 +87,7 @@ def derive_dims(row_id: int, entity: str | None, period: str, metric_name: str) 
     return {
         "customer": pick(CUSTOMERS, base + "|cust"),
         "customer_name": pick(CUSTOMERS, base + "|cust"),
-        "product_line": pick(PRODUCT_LINES, base + "|prod"),
+        "product_bgbu": pick(PRODUCT_LINES, base + "|prod"),
         "product": pick(PRODUCT_LINES, base + "|prod"),
         "region": pick(REGIONS, base + "|reg"),
         "project_name": pick(PROJECTS, base + "|proj"),
@@ -136,13 +136,13 @@ def enrich_existing_tags(conn) -> int:
         before = dict(tags)
         dims = derive_dims(rid, entity, period, mname)
 
-        for k in ("customer", "product_line", "bu", "region", "project_name", "department"):
+        for k in ("customer", "product_bgbu", "bu", "region", "project_name", "department"):
             if not tags.get(k):
                 tags[k] = dims[k]
         if not tags.get("customer_name") and tags.get("customer"):
             tags["customer_name"] = tags["customer"]
-        if not tags.get("product") and tags.get("product_line"):
-            tags["product"] = tags["product_line"]
+        if not tags.get("product") and tags.get("product_bgbu"):
+            tags["product"] = tags["product_bgbu"]
 
         if tags != before:
             updates.append({"id": rid, "tags": json.dumps(tags, ensure_ascii=False)})
@@ -169,7 +169,7 @@ def main():
             SELECT
               count(*) FILTER (WHERE tags IS NULL) AS null_tags,
               count(*) FILTER (WHERE tags->>'customer' IS NOT NULL) AS with_customer,
-              count(*) FILTER (WHERE tags->>'product_line' IS NOT NULL) AS with_product_line,
+              count(*) FILTER (WHERE tags->>'product_bgbu' IS NOT NULL) AS with_product_bgbu,
               count(*) FILTER (WHERE tags->>'bu' IS NOT NULL) AS with_bu,
               count(*) FILTER (WHERE tags->>'region' IS NOT NULL) AS with_region,
               count(*) FILTER (WHERE tags->>'project_name' IS NOT NULL) AS with_project,
@@ -180,7 +180,7 @@ def main():
         print(f"  total rows         : {r.total}")
         print(f"  tags IS NULL       : {r.null_tags}")
         print(f"  tags.customer      : {r.with_customer}")
-        print(f"  tags.product_line  : {r.with_product_line}")
+        print(f"  tags.product_bgbu  : {r.with_product_bgbu}")
         print(f"  tags.bu            : {r.with_bu}")
         print(f"  tags.region        : {r.with_region}")
         print(f"  tags.project_name  : {r.with_project}")
