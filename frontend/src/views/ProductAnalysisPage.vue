@@ -164,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import KpiCard from '@/components/dashboard/KpiCard.vue';
 import ChartWidget from '@/components/dashboard/ChartWidget.vue';
 import InlineInsights from '@/components/dashboard/InlineInsights.vue';
@@ -231,16 +231,19 @@ watch(periodDimension, () => {
 const summary = computed(() => metricsData.value?.summary);
 
 // Secondary dimension toggle: switch between customer and contract_type breakdown
+// Only switches when user explicitly toggles, not automatically when product is selected
 const displayBreakdowns = computed<BreakdownItem[]>(() => {
   if (drillMode.value) {
     return metricsData.value?.breakdowns || [];
   }
-  if (selectedProduct.value && secondaryDimension.value) {
-    if (secondaryDimension.value === 'contract_type') {
-      return metricsData.value?.contract_type_breakdown || [];
-    }
+  // Only switch to secondary dimension when user has explicitly toggled away from default
+  if (secondaryDimension.value === 'contract_type') {
+    return metricsData.value?.contract_type_breakdown || [];
+  }
+  if (secondaryDimension.value !== 'customer') {
     return metricsData.value?.customer_breakdown || [];
   }
+  // Default: show product_line breakdowns (filtered by selectedProduct on backend)
   return metricsData.value?.breakdowns || [];
 });
 
@@ -376,7 +379,7 @@ async function fetchMetrics() {
       period: period.value,
       dimension: currentDimension.value,
       entity: drillMode.value ? drillProduct.value : selectedProduct.value,
-      product: undefined,
+      product: selectedProduct.value,
       period_dimension: periodDimension.value,
       compare: compareBase.value,
       period_start: periodStart.value,
@@ -404,14 +407,18 @@ async function fetchOptions() {
 
 function refresh() { fetchMetrics(); }
 
+// Guard: prevent double-fetch during onMounted
+let _mounted = false;
+
 watch([periodDimension, selectedPeriod, compareBase, selectedProduct, periodStart, periodEnd], () => {
+  if (!_mounted) return;
   if (!drillMode.value) {
     fetchMetrics();
     loadRecommendations();
   }
 });
 
-onMounted(async () => { await fetchOptions(); await fetchMetrics(); loadRecommendations(); });
+onMounted(async () => { await fetchOptions(); await nextTick(); _mounted = true; fetchMetrics(); loadRecommendations(); });
 </script>
 
 <style scoped lang="less">

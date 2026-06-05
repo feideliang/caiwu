@@ -81,6 +81,7 @@
             </a-col>
             <a-col :span="6">
               <KpiCard title="基期收入" :value="toWan(basePeriodData?.summary?.revenue)" unit="万元" :precision="0"
+                :noData="basePeriodData?.summary?.revenue == null"
                 :trend="baseRevenueTrend" trendSuffix="%" />
             </a-col>
             <a-col :span="6">
@@ -111,6 +112,7 @@
             </a-col>
             <a-col :span="6">
               <KpiCard title="基期毛利额" :value="toWan(basePeriodData?.summary?.gross_profit)" unit="万元" :precision="0"
+                :noData="basePeriodData?.summary?.gross_profit == null"
                 :trend="baseProfitTrend" trendSuffix="%" />
             </a-col>
             <a-col :span="6">
@@ -139,7 +141,8 @@
               <KpiCard title="当期毛利率" :value="metricsData?.summary?.gross_margin || 0" unit="%" :precision="2" />
             </a-col>
             <a-col :span="8">
-              <KpiCard title="基期毛利率" :value="basePeriodData?.summary?.gross_margin || 0" unit="%" :precision="2" />
+              <KpiCard title="基期毛利率" :value="basePeriodData?.summary?.gross_margin || 0" unit="%" :precision="2"
+                :noData="basePeriodData?.summary?.gross_margin == null" />
             </a-col>
             <a-col :span="8">
               <KpiCard title="毛利率变化" :value="marginChangeValue" unit="pp" :precision="2" />
@@ -378,10 +381,6 @@ watch(compareBase, (val) => {
 // Reset cross-dimension when primary dimension changes
 watch([dimension, selectedEntity], ([newDim, newEntity], [oldDim, oldEntity]) => {
   crossDimension.value = '';
-  // Preserve department scope when leaving department dimension
-  if (oldDim === 'department' && newDim !== 'department' && oldEntity) {
-    departmentScope.value = oldEntity;
-  }
   // Set department scope when entity selected on department dimension
   if (newDim === 'department' && newEntity) {
     departmentScope.value = newEntity;
@@ -511,6 +510,7 @@ function categoryLabel(category: string): string {
   if (category === 'continuing') return '存续';
   if (category === 'new') return '新增';
   if (category === 'exit') return '退出';
+  if (category === 'unknown') return '未知(基期数据缺失)';
   return category;
 }
 
@@ -557,11 +557,10 @@ function computeTopImpacts(
   const withPct = impacts.map((i) => ({
     name: i.name,
     change: i.change,
-    pct: Math.round((i.change / totalNetChange) * 100),
+    pct: Math.round((i.change / Math.abs(totalNetChange)) * 100),
   }));
 
-  let cumAbsPct = 0;
-  return withPct.filter((i) => { cumAbsPct += Math.abs(i.pct); return cumAbsPct <= 100 || i === withPct[0]; });
+  return withPct;
 }
 
 const revenueTopImpacts = computed(() => {
@@ -617,10 +616,16 @@ const profitTopImpactPage = computed(() => {
 const assistantContext = computed(() => ({
   period: period.value,
   dimension: dimension.value,
+  entity: selectedEntity.value,
   period_dimension: periodDimension.value,
   period_start: periodStart.value,
   period_end: periodEnd.value,
+  department: dimension.value === 'department' ? selectedEntity.value : undefined,
+  product: dimension.value === 'product_line' ? selectedEntity.value : undefined,
+  customer: dimension.value === 'customer' ? selectedEntity.value : undefined,
   active_section: 'change_analysis',
+  // Pass the actual page data for AI to analyze
+  metrics_data: metricsData.value?.summary as Record<string, unknown> | undefined,
 }));
 
 const recommendations = ref<AnalysisRecommendations>();
@@ -638,7 +643,11 @@ async function loadRecommendations() {
     const { data } = await getAnalysisRecommendations({
       page_type: 'core_metrics',
       period: period.value,
+      period_dimension: periodDimension.value,
+      period_start: periodStart.value,
+      period_end: periodEnd.value,
       period_compare_type: compareBase.value,
+      dimension: dimension.value,
       ...extra,
     });
     recommendations.value = data.data || undefined;
@@ -655,6 +664,14 @@ async function fetchMetrics() {
     const deptParam = departmentScope.value;
     const effectiveDim = crossDimension.value || dimension.value;
     const entityParam = effectiveDim !== 'company' && !crossDimension.value ? selectedEntity.value : undefined;
+    // When cross-dimension is active, carry the original dimension's entity as a filter param
+    // e.g. customer=抖音集团&dimension=sales_product → scoped to that customer
+    const crossDimExtra: Record<string, string | undefined> = {};
+    if (crossDimension.value && selectedEntity.value) {
+      if (dimension.value === 'customer') crossDimExtra.customer = selectedEntity.value;
+      else if (dimension.value === 'product_line') crossDimExtra.product = selectedEntity.value;
+      else if (dimension.value === 'department') crossDimExtra.department = selectedEntity.value;
+    }
     const { data: resp } = await getCoreMetrics({
       period: period.value,
       dimension: effectiveDim,
@@ -665,6 +682,7 @@ async function fetchMetrics() {
       compare_period: basePeriod.value,
       period_start: periodStart.value,
       period_end: periodEnd.value,
+      ...crossDimExtra,
     });
     if (key !== fetchKey) return; // stale request, discard
     metricsData.value = resp.data as CoreMetricsResponse;
@@ -683,6 +701,7 @@ async function fetchMetrics() {
         compare: 'all',
         period_start: isCustomCompareRange ? comparePeriodStart.value : periodStart.value,
         period_end: isCustomCompareRange ? comparePeriodEnd.value : periodEnd.value,
+        ...crossDimExtra,
       });
       if (key !== fetchKey) return; // stale request, discard
       basePeriodData.value = baseResp.data as CoreMetricsResponse;
@@ -736,6 +755,13 @@ let _oldCompare: string | undefined;
 watch([periodDimension, selectedPeriod, dimension, periodStart, periodEnd, selectedEntity, compareBase, comparePeriod, comparePeriodStart, comparePeriodEnd, crossDimension], async ([, newSP, newDim, , , , newCompare]) => {
   if (!newSP) return;
   if (_oldDim !== newDim || _oldCompare !== newCompare) {
+    // Clear entity immediately when dimension changes to prevent stale entity
+    // from being sent with new dimension (e.g., product_line entity sent to customer dimension)
+    selectedEntity.value = undefined;
+    // Clear department filter when leaving department dimension to avoid stale filtering
+    if (_oldDim === 'department' && newDim !== 'department') {
+      departmentScope.value = undefined;
+    }
     await loadEntityOptions();
     _oldDim = newDim;
     _oldCompare = newCompare;

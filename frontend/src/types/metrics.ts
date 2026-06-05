@@ -21,7 +21,9 @@ export interface CoreMetricsSummary {
   top_customer_share?: number;
   top_product_margin_share?: number;
   revenue_consecutive_growth?: number;
+  revenue_consecutive_growth_avg?: number;
   gross_profit_consecutive_growth?: number;
+  gross_profit_consecutive_growth_avg?: number;
   gross_margin_volatility?: number;
   gross_margin_volatility_change?: number;
   margin_change_analysis?: MarginChangeItem[];

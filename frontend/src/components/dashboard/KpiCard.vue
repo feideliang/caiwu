@@ -16,7 +16,8 @@
       </template>
       <template #suffix>
         <span class="unit">{{ unit }}</span>
-        <span v-if="trend !== undefined" :class="['trend', trendClass]">
+        <span v-if="noData" class="no-data-text">暂无基期数据</span>
+        <span v-else-if="trend !== undefined" :class="['trend', trendClass]">
           <span v-if="trendLabel" class="trend-label">{{ trendLabel }}</span>
           <CaretUpOutlined v-if="trend > 0" />
           <CaretDownOutlined v-else-if="trend < 0" />
@@ -49,6 +50,7 @@ const props = withDefaults(defineProps<{
   icon?: Component;
   alert?: 'red' | 'yellow' | 'blue';
   labelDisplay?: string;
+  noData?: boolean;
 }>(), {
   unit: '',
   precision: 2,
@@ -59,6 +61,7 @@ const props = withDefaults(defineProps<{
   icon: undefined,
   alert: undefined,
   labelDisplay: undefined,
+  noData: false,
 });
 
 const isSmall = ref(window.innerWidth < 768);
@@ -122,5 +125,11 @@ const cardPadding = computed(() => isSmall.value ? '12px' : '20px 24px');
   border-radius: 50%;
   margin-left: 6px;
   vertical-align: middle;
+}
+
+.no-data-text {
+  font-size: 12px;
+  color: var(--color-text-tertiary, #999);
+  margin-left: 6px;
 }
 </style>

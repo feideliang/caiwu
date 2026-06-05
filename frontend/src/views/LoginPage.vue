@@ -99,13 +99,13 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #c41d1d 0%, #8b0000 100%);
 }
 
 .login-card {
   width: 400px;
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 32px rgba(196, 29, 29, 0.2);
 
   .login-header {
     text-align: center;
@@ -115,7 +115,7 @@ onMounted(() => {
       font-size: 24px;
       font-weight: 600;
       margin-bottom: 8px;
-      color: var(--color-text);
+      color: #c41d1d;
     }
 
     p {

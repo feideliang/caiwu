@@ -1,5 +1,5 @@
 <template>
-  <a-config-provider :theme="{ token: { colorPrimary: '#1677ff' } }">
+  <a-config-provider :theme="{ token: { colorPrimary: '#c41d1d' } }">
     <router-view />
   </a-config-provider>
 </template>

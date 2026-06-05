@@ -54,7 +54,7 @@ import FinancialAssistantPanel from '@/components/ai/FinancialAssistantPanel.vue
 import { getFilterOptions } from '@/api/filters';
 import { getAnalysisRecommendations } from '@/api/ai';
 import type { AnalysisRecommendations } from '@/types/analysis';
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { ref, nextTick, onMounted, onUnmounted, computed, watch } from 'vue';
 import {
   buildPeriodOptions,
   formatMonthValue,
@@ -98,7 +98,11 @@ function onCustomRangeChange(dates: any) {
   }
 }
 
+// Guard: prevent double-fetch when fetchFilterOptions sets selectedPeriod during onMounted
+let _mounted = false;
+
 watch([selectedPeriod, periodDimension, selectedMarketLine, selectedProduct], () => {
+  if (!_mounted) return;
   if (periodDimension.value !== 'custom') {
     periodStart.value = undefined;
     periodEnd.value = undefined;
@@ -171,9 +175,11 @@ async function fetchFilterOptions() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('resize', updateSize);
-  fetchFilterOptions();
+  await fetchFilterOptions();
+  await nextTick();
+  _mounted = true;
   loadRecommendations();
 });
 onUnmounted(() => window.removeEventListener('resize', updateSize));

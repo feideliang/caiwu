@@ -36,7 +36,7 @@
               <a-select-option value="custom_compare">自定义期间</a-select-option>
             </a-select>
             <!-- Customer selector -->
-            <a-select v-model:value="selectedCustomer" :options="filteredCustomerOptions" style="width: 180px" placeholder="客户" allow-clear show-search @search="val => customerSearchValue.value = val" />
+            <a-select v-model:value="selectedCustomer" :options="filteredCustomerOptions" style="width: 180px" placeholder="客户" allow-clear show-search @search="(val: string) => customerSearchValue = val" />
             <!-- Secondary dimension selector -->
             <a-select v-if="selectedCustomer" v-model:value="secondaryDimension" style="width: 130px" placeholder="对比维度">
               <a-select-option value="customer">客户</a-select-option>
@@ -154,7 +154,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import KpiCard from '@/components/dashboard/KpiCard.vue';
 import ChartWidget from '@/components/dashboard/ChartWidget.vue';
 import InlineInsights from '@/components/dashboard/InlineInsights.vue';
@@ -319,6 +319,7 @@ const assistantContext = computed(() => ({
   period_dimension: periodDimension.value,
   period_start: periodStart.value,
   period_end: periodEnd.value,
+      compare: compareBase.value,
   period_compare_type: compareBase.value,
   active_section: 'customer',
 }));
@@ -347,6 +348,7 @@ async function fetchMetrics() {
       period_dimension: periodDimension.value,
       period_start: periodStart.value,
       period_end: periodEnd.value,
+      compare: compareBase.value,
     };
     if (drillMode.value && drillCustomer.value) {
       params.entity = drillCustomer.value;
@@ -378,14 +380,18 @@ async function fetchOptions() {
 
 function refresh() { fetchMetrics(); }
 
+// Guard: prevent double-fetch when fetchOptions sets selectedPeriod during onMounted
+let _mounted = false;
+
 watch([periodDimension, selectedPeriod, compareBase, selectedCustomer, periodStart, periodEnd], () => {
+  if (!_mounted) return;
   if (!drillMode.value) {
     fetchMetrics();
     loadRecommendations();
   }
 });
 
-onMounted(async () => { await fetchOptions(); await fetchMetrics(); loadRecommendations(); });
+onMounted(async () => { await fetchOptions(); await nextTick(); _mounted = true; fetchMetrics(); loadRecommendations(); });
 </script>
 
 <style scoped lang="less">

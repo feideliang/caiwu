@@ -59,7 +59,7 @@ TAG_COLUMNS: dict[str, str] = {
     "product_classification": "product_classification",
     "product_bu_code": "product_bu_code",
     "product_bu_name": "product_bu_name",
-    "product_bgbu": "product_bgbu",
+    "product_bgbu": "product_line",
     "product_org": "product_org",
     "series": "series",
     "product_line": "product_line",

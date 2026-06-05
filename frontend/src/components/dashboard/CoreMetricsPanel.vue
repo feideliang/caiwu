@@ -175,21 +175,36 @@ const topCustomerName = computed(() => {
 });
 
 function calcStreakAvg(trend: any[], field: string, streakMonths: number): number {
-  // Find the last positive month, then average growth over streak months
-  let lastPos = -1;
+  // Calculate average growth over the consecutive growth streak ending at the last positive month
+  // Example: if months 2,3 grew and month 4 dropped, streakMonths=2, average months 2,3 growth
+  if (!trend || trend.length === 0 || streakMonths === 0) return 0;
+
+  // Find the last positive month (end of streak)
+  let lastPositive = -1;
   for (let i = trend.length - 1; i >= 0; i--) {
     const val = trend[i]?.[field];
     if (val !== null && val !== undefined && val > 0) {
-      lastPos = i;
+      lastPositive = i;
       break;
     }
   }
-  if (lastPos === -1 || streakMonths === 0) return 0;
+
+  if (lastPositive === -1) return 0;
+
+  // Average the growth rates from (lastPositive - streakMonths + 1) to lastPositive
   let sum = 0;
-  for (let i = lastPos; i > lastPos - streakMonths && i >= 0; i--) {
-    sum += trend[i]?.[field] || 0;
+  let count = 0;
+  const startIdx = Math.max(0, lastPositive - streakMonths + 1);
+
+  for (let i = startIdx; i <= lastPositive; i++) {
+    const val = trend[i]?.[field];
+    if (val !== null && val !== undefined) {
+      sum += val;
+      count++;
+    }
   }
-  return sum / streakMonths;
+
+  return count > 0 ? sum / count : 0;
 }
 
 const growthCards = computed(() => {
@@ -199,11 +214,13 @@ const growthCards = computed(() => {
   const revConsec = s.revenue_consecutive_growth ?? null;
   const gpConsec = s.gross_profit_consecutive_growth ?? null;
 
+  // Use backend-computed avg (based on monthly MoM) when available;
+  // fall back to frontend calcStreakAvg for backward compat
   const revAvg = !isMonthly && revConsec != null
-    ? calcStreakAvg(trend, 'revenue_mom_growth', revConsec)
+    ? (s.revenue_consecutive_growth_avg ?? calcStreakAvg(trend, 'revenue_mom_growth', revConsec))
     : 0;
   const gpAvg = !isMonthly && gpConsec != null
-    ? calcStreakAvg(trend, 'gross_profit_mom_growth', gpConsec)
+    ? (s.gross_profit_consecutive_growth_avg ?? calcStreakAvg(trend, 'gross_profit_mom_growth', gpConsec))
     : 0;
 
   const makeGrowthCard = (title: string, value: number | null, avg: number) => ({

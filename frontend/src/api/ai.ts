@@ -68,6 +68,8 @@ export interface ChatContext {
   customer?: string;
   period_compare_type?: string;
   active_section?: string;
+  /** Current page metrics summary data for AI to analyze */
+  metrics_data?: Record<string, unknown>;
 }
 
 export interface ChatMessage {

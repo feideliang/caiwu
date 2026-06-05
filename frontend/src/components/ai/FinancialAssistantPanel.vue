@@ -257,7 +257,7 @@ function onModelChange() {
 }
 
 function formatMetricValue(m: MetricRecommendation): string {
-  if (m.metric_key.includes('margin') || m.metric_key.includes('concentration') || m.metric_key.includes('ratio')) {
+  if (m.metric_key.includes('margin') || m.metric_key.includes('concentration') || m.metric_key.includes('ratio') || m.metric_key.includes('growth')) {
     return m.current_value != null ? `${m.current_value.toFixed(1)}%` : '--';
   }
   if (m.current_value != null && m.current_value > 10000) {

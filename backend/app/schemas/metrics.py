@@ -30,6 +30,11 @@ class MarginChangeItem(BaseModel):
     structure_impact: float | None = None
     margin_impact: float | None = None
     total_impact: float | None = None
+    # Per-category impact fields (only one is non-zero per row)
+    continuing_structure_impact: float | None = None
+    continuing_margin_impact: float | None = None
+    new_impact: float | None = None
+    exit_impact: float | None = None
 
 
 class CoreMetricsSummary(BaseModel):
@@ -48,7 +53,9 @@ class CoreMetricsSummary(BaseModel):
     high_margin_order_ratio: float | None = None
     top_customer_share: float | None = None
     revenue_consecutive_growth: int | None = None
+    revenue_consecutive_growth_avg: float | None = None
     gross_profit_consecutive_growth: int | None = None
+    gross_profit_consecutive_growth_avg: float | None = None
     gross_margin_volatility: float | None = None
     gross_margin_volatility_change: float | None = None
     margin_change_analysis: list[MarginChangeItem] | None = None

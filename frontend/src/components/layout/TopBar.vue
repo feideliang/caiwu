@@ -181,6 +181,17 @@ function handleLogout() {
   background: var(--color-bg-container);
   border-bottom: 1px solid #f0f0f0;
   height: var(--topbar-height);
+  position: relative;
+}
+
+.topbar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #c41d1d, #ff4d4f);
 }
 
 .topbar-left {

@@ -70,6 +70,7 @@ class ChatContext(BaseModel):
     customer: str | None = None
     period_compare_type: str | None = None
     active_section: str | None = None  # 'overview' | 'trend' | 'department' | 'product'
+    metrics_data: dict[str, object] | None = None  # Current page KPI summary for AI analysis
 
 
 class ChatMessage(BaseModel):

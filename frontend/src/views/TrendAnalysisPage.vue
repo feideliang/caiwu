@@ -93,7 +93,7 @@
 
 <script setup lang="ts">
 import { useAuthStore } from '@/store/auth';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import KpiCard from '@/components/dashboard/KpiCard.vue';
 import ChartWidget from '@/components/dashboard/ChartWidget.vue';
 import InlineInsights from '@/components/dashboard/InlineInsights.vue';
@@ -220,7 +220,7 @@ const grossMarginTrend = computed(() => {
   const ts = metricsData.value?.trend_series || [];
   if (!ts.length) return undefined;
   const latest = ts[ts.length - 1];
-  const key = compareBase.value === 'mom' ? 'gross_margin_mom_change' as const : 'gross_margin_yoy_change' as const;
+  const key = compareBase.value === 'mom' ? 'gross_margin_mom_growth' as const : 'gross_margin_yoy_growth' as const;
   return latest[key] ?? undefined;
 });
 
@@ -348,19 +348,25 @@ async function loadEntityOptions() {
 function refresh() { fetchMetrics(); }
 
 // Reload entity options only when dimension changes (clears previous selection)
+// Guard: prevent double-fetch during onMounted
+let _mounted = false;
+
 watch(trendDimension, async () => {
-  await loadEntityOptions();
-  fetchMetrics();
-  loadRecommendations();
+  if (_mounted) {
+    await loadEntityOptions();
+    fetchMetrics();
+    loadRecommendations();
+  }
 });
 
 // Refresh data and recommendations on other filter changes
 watch([periodDimension, selectedPeriod, selectedEntity, compareBase], () => {
+  if (!_mounted) return;
   fetchMetrics();
   loadRecommendations();
 });
 
-onMounted(async () => { await fetchOptions(); await fetchMetrics(); loadRecommendations(); });
+onMounted(async () => { await fetchOptions(); await nextTick(); _mounted = true; fetchMetrics(); loadRecommendations(); });
 </script>
 
 <style scoped lang="less">

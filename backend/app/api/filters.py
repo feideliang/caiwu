@@ -124,50 +124,44 @@ async def get_filter_options(
             else:
                 agg_type = dim_type_map[dimension]
                 if dimension == "customer":
-                    # Return objects with label=superior_name, value=customer (dim_value)
-                    # so the frontend shows 上级名称 but sends the actual customer name to API
+                    # Return objects with label=superior_name, value=superior_name
                     imd_bgbu_cond = (
                         IncomeMarginDetail.bgbu == bgbu
                         if bgbu != "ALL"
                         else IncomeMarginDetail.bgbu != "ALL"
                     )
                     stmt = (
-                        select(IncomeMarginDetail.superior_name, IncomeMarginDetail.customer)
+                        select(IncomeMarginDetail.superior_name)
                         .where(imd_bgbu_cond)
                         .where(IncomeMarginDetail.superior_name.isnot(None))
                         .distinct()
                         .order_by(IncomeMarginDetail.superior_name)
                     )
                 else:
-                    stmt = (
-                        select(AggDimensionSummary.dim_value)
-                        .where(AggDimensionSummary.bgbu == bgbu)
-                        .where(AggDimensionSummary.dim_type == agg_type)
-                        .distinct()
-                        .order_by(AggDimensionSummary.dim_value)
-                    )
+                    # Query IncomeMarginDetail directly for product_line (not AggDimensionSummary)
+                    # AggDimensionSummary.dim_value for product_line may not match actual field values
+                    if dimension == "product_line":
+                        stmt = (
+                            select(IncomeMarginDetail.product_line)
+                            .where(IncomeMarginDetail.product_line.isnot(None))
+                            .distinct()
+                            .order_by(IncomeMarginDetail.product_line)
+                        )
+                    else:
+                        stmt = (
+                            select(AggDimensionSummary.dim_value)
+                            .where(AggDimensionSummary.bgbu == bgbu)
+                            .where(AggDimensionSummary.dim_type == agg_type)
+                            .distinct()
+                            .order_by(AggDimensionSummary.dim_value)
+                        )
             if prefix:
                 col = stmt.selected_columns[0]
                 stmt = stmt.where(col.like(f"{prefix}%"))
             result = await db.execute(stmt)
             rows = result.all()
             if dimension == "customer":
-                # Return { label: superior_name, value: customer } objects
-                # When customer is NULL, use superior_name as value
-                options = []
-                for r in rows:
-                    label = str(r[0]) if r[0] is not None else None
-                    value = str(r[1]) if r[1] is not None else label
-                    if label:
-                        options.append({"label": label, "value": value})
-                # Deduplicate by value (customer name), keep first superior_name
-                seen: set[str] = set()
-                deduped: list[dict[str, str]] = []
-                for o in options:
-                    if o["value"] not in seen:
-                        seen.add(o["value"])
-                        deduped.append(o)
-                options = deduped
+                options = [{"label": str(r[0]), "value": str(r[0])} for r in rows if r[0] is not None]
             else:
                 options = [str(r[0]) for r in rows if r[0] is not None]
             return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})

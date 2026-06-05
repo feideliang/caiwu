@@ -126,7 +126,7 @@ function formatMargin(v: number | undefined): string {
     width: 24px;
     height: 24px;
     text-align: center;
-    background: #e8e8e8;
+    background: #f0f0f0;
     color: #888;
     border-radius: 50%;
     font-size: 12px;
@@ -134,9 +134,9 @@ function formatMargin(v: number | undefined): string {
     flex-shrink: 0;
     margin-top: 2px;
 
-    &.rank-1 { background: #ffd700; color: #fff; }
-    &.rank-2 { background: #c0c0c0; color: #fff; }
-    &.rank-3 { background: #cd7f32; color: #fff; }
+    &.rank-1 { background: #c41d1d; color: #fff; }
+    &.rank-2 { background: #ff4d4f; color: #fff; }
+    &.rank-3 { background: #ff9c9e; color: #fff; }
   }
   .name {
     width: 80px;
@@ -166,7 +166,7 @@ function formatMargin(v: number | undefined): string {
     .metric-value {
       font-weight: 600;
       font-size: 12px;
-      color: var(--color-primary, #1677ff);
+      color: var(--color-primary, #c41d1d);
       width: 90px;
       flex-shrink: 0;
       &.profit { color: #52c41a; }

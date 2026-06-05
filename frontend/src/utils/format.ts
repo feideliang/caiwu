@@ -11,7 +11,7 @@ function formatNumber(value: number, decimals: number): string {
   });
 }
 
-export function toWan(value: number | undefined): number {
+export function toWan(value: number | undefined | null): number {
   const numeric = toNumber(value);
   return numeric == null ? 0 : numeric / 10000;
 }

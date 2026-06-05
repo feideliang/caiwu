@@ -137,6 +137,8 @@ const chartOption = computed(() => {
       left: isMobile.value ? 40 : 60,
       right: 20,
     },
+    color: ['#c41d1d', '#ff4d4f', '#ff7875', '#ff9c9e', '#ffccc7',
+            '#cf1322', '#a8071a', '#820014', '#5c0011', '#f5222d'],
   };
 
   const xKey = Object.keys(props.data[0])[0] || 'name';

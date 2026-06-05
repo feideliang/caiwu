@@ -85,7 +85,7 @@ SELECT
     MIN(w.product_classification) AS classification,
     MIN(w.product_bu_code) AS bu_code,
     MIN(w.product_bu_name) AS bu_name,
-    MIN(w.product_bgbu) AS bgbu,
+    MIN(w.product_line) AS bgbu,
     MIN(w.product_org) AS org,
     MIN(w.series) AS series,
     MIN(w.product_line) AS product_line,

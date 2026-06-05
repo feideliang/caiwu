@@ -3,9 +3,10 @@
     v-model:collapsed="collapsed"
     :trigger="null"
     collapsible
-    theme="dark"
+    theme="light"
     :width="220"
     :collapsed-width="64"
+    :style="{ background: '#fff', borderRight: '1px solid #f0f0f0' }"
   >
     <div class="logo">
       <span v-if="!collapsed">数智财务</span>
@@ -14,7 +15,7 @@
     <a-menu
       v-model:selectedKeys="selectedKeys"
       mode="inline"
-      theme="dark"
+      theme="light"
       @click="handleMenuClick"
     >
       <a-menu-item key="dashboard">
@@ -160,15 +161,18 @@ function handleMenuClick({ key }: { key: string }) {
 
 <style scoped lang="less">
 .logo {
-  height: 32px;
-  margin: 16px;
-  color: #fff;
-  font-size: 18px;
-  font-weight: 600;
+  height: 48px;
+  margin: 0;
+  padding: 0 16px;
+  color: #c41d1d;
+  font-size: 20px;
+  font-weight: 700;
   text-align: center;
-  line-height: 32px;
+  line-height: 48px;
   overflow: hidden;
   white-space: nowrap;
+  border-bottom: 1px solid #f0f0f0;
+  letter-spacing: 2px;
 }
 
 .collapse-trigger {
@@ -176,13 +180,13 @@ function handleMenuClick({ key }: { key: string }) {
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(0, 0, 0, 0.45);
   cursor: pointer;
   font-size: 16px;
   transition: color 0.3s;
 
   &:hover {
-    color: #fff;
+    color: #c41d1d;
   }
 }
 
@@ -195,5 +199,30 @@ function handleMenuClick({ key }: { key: string }) {
 :deep(.ant-menu) {
   flex: 1;
   overflow: auto;
+  border-right: none !important;
+}
+
+:deep(.ant-menu-item-selected) {
+  background-color: #c41d1d !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+
+:deep(.ant-menu-item-selected::after) {
+  border-right-color: #c41d1d !important;
+}
+
+:deep(.ant-menu-item:hover) {
+  color: #c41d1d !important;
+}
+
+:deep(.ant-menu-item-selected:hover) {
+  color: #fff !important;
+}
+
+:deep(.ant-menu-item) {
+  border-radius: 0 !important;
+  margin: 0 !important;
+  width: 100% !important;
 }
 </style>

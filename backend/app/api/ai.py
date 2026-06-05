@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.response import APIResponse
 from app.core.security import decode_access_token, TokenPayload, get_current_user
 from app.db.session import get_db
-from app.models.core import AggDimensionSummary, AggPeriodSummary
+from app.models.core import AggDimensionSummary, AggPeriodSummary, IncomeMarginDetail
 from app.schemas.ai import (
     ChartRecommendRequest,
     ChartRecommendResponse,
@@ -120,17 +120,22 @@ async def ai_analyze(
         bgbu_filter = "ALL"
 
     if metric_col is not None:
-        # Use aggregated dimension summary table (dim_type='customer' for customer-level aggregation)
+        # Use IncomeMarginDetail grouped by superior_name for customer-level aggregation
+        imd_col_map = {
+            "revenue": func.sum(IncomeMarginDetail.revenue_amount),
+            "cost": func.sum(IncomeMarginDetail.cost_amount),
+            "gross_profit": func.sum(IncomeMarginDetail.gross_profit_amount),
+        }
+        imd_agg_col = imd_col_map.get(metric)
         curr_stmt = select(
-            AggDimensionSummary.dim_value.label("entity"),
-            metric_col.label("value"),
+            IncomeMarginDetail.superior_name.label("entity"),
+            imd_agg_col.label("value"),
         ).where(
-            AggDimensionSummary.period == period,
-            AggDimensionSummary.dim_type == "customer",
-            AggDimensionSummary.bgbu == bgbu_filter,
-            AggDimensionSummary.dim_value.isnot(None),
-            AggDimensionSummary.dim_value != "",
-        )
+            IncomeMarginDetail.period == period,
+            IncomeMarginDetail.bgbu == bgbu_filter,
+            IncomeMarginDetail.superior_name.isnot(None),
+            IncomeMarginDetail.superior_name != "",
+        ).group_by(IncomeMarginDetail.superior_name)
         curr_result = await db.execute(curr_stmt)
         curr_rows = curr_result.all()
     else:
@@ -155,17 +160,22 @@ async def ai_analyze(
         prev_period = f"{year}-Q{q}"
 
     if metric_col is not None:
-        # Use aggregated dimension summary table for previous period
+        # Use IncomeMarginDetail grouped by superior_name for previous period
+        imd_col_map = {
+            "revenue": func.sum(IncomeMarginDetail.revenue_amount),
+            "cost": func.sum(IncomeMarginDetail.cost_amount),
+            "gross_profit": func.sum(IncomeMarginDetail.gross_profit_amount),
+        }
+        imd_agg_col = imd_col_map.get(metric)
         prev_stmt = select(
-            AggDimensionSummary.dim_value.label("entity"),
-            metric_col.label("value"),
+            IncomeMarginDetail.superior_name.label("entity"),
+            imd_agg_col.label("value"),
         ).where(
-            AggDimensionSummary.period == prev_period,
-            AggDimensionSummary.dim_type == "customer",
-            AggDimensionSummary.bgbu == bgbu_filter,
-            AggDimensionSummary.dim_value.isnot(None),
-            AggDimensionSummary.dim_value != "",
-        )
+            IncomeMarginDetail.period == prev_period,
+            IncomeMarginDetail.bgbu == bgbu_filter,
+            IncomeMarginDetail.superior_name.isnot(None),
+            IncomeMarginDetail.superior_name != "",
+        ).group_by(IncomeMarginDetail.superior_name)
         prev_result = await db.execute(prev_stmt)
         prev_rows = prev_result.all()
     else:
@@ -346,7 +356,7 @@ _KNOWLEDGE_BASE_RULES = (
     # ── 可用的分析维度字段 ──
     "--- 数据维度说明（financial_data tags JSON字段）---\n"
     "组织维度：department(市场线:CBG/EBG/SBG/TBU), sales_department(销售部门), hr_department(HR部门), hr_dept_code\n"
-    "产品维度：product_line(产品线), series(产品系列), product_category(产品大类), product_classification(产品分类), product_family(产品族), product_bu_name(产品事业部名称), product_bu_code(产品事业部代码), product_org(产品所属组织), product_bgbu(产品归属BGBU)\n"
+    "产品维度：product_line(产品线), series(产品系列), product_category(产品大类), product_classification(产品分类), product_family(产品族), product_bu_name(产品事业部名称), product_bu_code(产品事业部代码), product_org(产品所属组织), product_line(产品归属BGBU)\n"
     "销售产品维度：sales_product_code(销售产品代码), sales_product_name(销售产品名称), material_code(物料编码), material_desc(物料描述), material_cost_category(物料成本大类)\n"
     "成本分类维度：cost_class_1(一级成本分类), cost_class_2(二级成本分类), cost_class_3(三级成本分类), cost_category(成本大类)\n"
     "客户维度：customer(客户), ncc_customer_code(NCC客户编码), order_customer(订单客户), invoice_customer(开票客户简称), invoice_name(开票名称), final_customer(最终客户名称), superior_name(上级名称), contract_type(客户签约类型:直签/渠道)\n"
@@ -557,7 +567,7 @@ def build_analysis_recommendations(
     elif page_type == "trend":
         metrics = [
             MetricRecommendation(
-                metric_name="收入同比", metric_key="revenue_yoy_growth",
+                metric_name="收入同比增长率", metric_key="revenue_yoy_growth",
                 description="收入同比增长率", current_value=rev_yoy,
                 status="warning" if rev_yoy is not None and rev_yoy < 0 else "normal",
                 recommendation="收入同比下滑需深入分析" if rev_yoy is not None and rev_yoy < 0 else "收入增长趋势良好"
@@ -605,7 +615,7 @@ def build_analysis_recommendations(
                 recommendation="关注低毛利产品线"
             ),
             MetricRecommendation(
-                metric_name="收入同比", metric_key="revenue_yoy_growth",
+                metric_name="收入同比增长率", metric_key="revenue_yoy_growth",
                 description="收入同比变化",
                 current_value=kpis.get("revenue_yoy_growth"),
                 status="warning" if (kpis.get("revenue_yoy_growth") or 0) < -10 else "normal",
@@ -648,7 +658,7 @@ def build_analysis_recommendations(
     elif page_type == "core_metrics":
         metrics = [
             MetricRecommendation(
-                metric_name="收入同比", metric_key="revenue_yoy_growth",
+                metric_name="收入同比增长率", metric_key="revenue_yoy_growth",
                 description="收入同比增长率",
                 current_value=rev_yoy,
                 status="warning" if rev_yoy is not None and rev_yoy < 0 else "normal",
@@ -934,16 +944,23 @@ async def ai_chat(
 
     ctx = body.context
     t0 = time.time()
-    kpis = await _build_kpis(
-        db,
-        period_compare_type=ctx.period_compare_type if ctx else None,
-        period_dimension=ctx.period_dimension if ctx else None,
-        period=ctx.period if ctx else None,
-        period_start=ctx.period_start if ctx else None,
-        period_end=ctx.period_end if ctx else None,
-        department=ctx.department if ctx else None,
-        product=ctx.product if ctx else None,
-    )
+
+    # Use page's own metrics_data when available (avoids redundant DB queries
+    # and ensures AI analyzes exactly what the user sees on screen)
+    if ctx and ctx.metrics_data:
+        kpis = ctx.metrics_data
+    else:
+        kpis = await _build_kpis(
+            db,
+            period_compare_type=ctx.period_compare_type if ctx else None,
+            period_dimension=ctx.period_dimension if ctx else None,
+            period=ctx.period if ctx else None,
+            period_start=ctx.period_start if ctx else None,
+            period_end=ctx.period_end if ctx else None,
+            department=ctx.department if ctx else None,
+            product=ctx.product if ctx else None,
+            customer=ctx.customer if ctx else None,
+        )
 
     # Fetch department and product breakdowns for chat prompt
     dept_items, prod_items = [], []
@@ -1440,7 +1457,7 @@ async def get_analysis_recommendations(
         result = await MetricsService.get_core_metrics(
             db=db,
             period=body.period,
-            dimension="customer" if cust_param else "company",
+            dimension="company",
             compare="mom",
             period_dimension=resolved_pd,
             customer=cust_param,

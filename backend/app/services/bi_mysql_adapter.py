@@ -44,7 +44,7 @@ MYSQL_COLUMN_MAP = {
     "产品事业部名称": "tag:product_bu_name",
     "产品事业部代码": "tag:product_bu_code",
     "产品所属组织": "tag:product_org",
-    "产品归属BGBU": "tag:product_bgbu",
+    "产品归属BGBU": "tag:product_line",
     "销售产品代码": "tag:sales_product_code",
     "销售产品名称": "tag:sales_product_name",
     "物料编码": "tag:material_code",
@@ -188,6 +188,11 @@ class BIMysqlAdapter:
         if "period" in df_mapped.columns:
             df_mapped["period"] = df_mapped["period"].apply(
                 lambda v: str(v)[:7] if v else "2026-03"
+            )
+        elif "revenue_confirm_date" in df_mapped.columns:
+            # Use revenue_confirm_date as period source
+            df_mapped["period"] = df_mapped["revenue_confirm_date"].apply(
+                lambda v: str(v)[:7] if v else None
             )
 
         records = []

@@ -62,7 +62,7 @@ SEED_RULES = [
 
     # ── 数据维度说明 ──
     ("dimension_org", "组织维度字段：department(市场线:CBG/EBG/SBG/TBU), sales_department(销售部门), hr_department(HR部门), hr_dept_code(HR部门编码)", "数据维度", None, None, None, None, False),
-    ("dimension_product", "产品维度字段：product_line(产品线), series(产品系列), product_category(产品大类), product_classification(产品分类), product_family(产品族), product_bu_name(产品事业部名称), product_bu_code(产品事业部代码), product_org(产品所属组织), product_bgbu(产品归属BGBU)", "数据维度", None, None, None, None, False),
+    ("dimension_product", "产品维度字段：product_line(产品线), series(产品系列), product_category(产品大类), product_classification(产品分类), product_family(产品族), product_bu_name(产品事业部名称), product_bu_code(产品事业部代码), product_org(产品所属组织), product_line(产品归属BGBU)", "数据维度", None, None, None, None, False),
     ("dimension_sales_product", "销售产品维度字段：sales_product_code(销售产品代码), sales_product_name(销售产品名称), material_code(物料编码), material_desc(物料描述), material_cost_category(物料成本大类)", "数据维度", None, None, None, None, False),
     ("dimension_cost", "成本分类维度字段：cost_class_1(一级成本分类), cost_class_2(二级成本分类), cost_class_3(三级成本分类), cost_category(成本大类)", "数据维度", None, None, None, None, False),
     ("dimension_customer", "客户维度字段：customer(客户), ncc_customer_code(NCC客户编码), order_customer(订单客户), invoice_customer(开票客户简称), invoice_name(开票名称), final_customer(最终客户名称), superior_name(上级名称), contract_type(客户签约类型:直签/渠道)", "数据维度", None, None, None, None, False),

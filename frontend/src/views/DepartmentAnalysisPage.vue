@@ -44,7 +44,7 @@
               <a-select-option value="customer">客户</a-select-option>
             </a-select>
             <!-- Customer filter (only when secondary dimension is customer) -->
-            <a-select v-if="secondaryDimension === 'customer'" v-model:value="selectedCustomer" :options="filteredCustomerOptions" style="width: 180px" placeholder="客户" allow-clear show-search @search="val => customerSearchValue = val" />
+            <a-select v-if="secondaryDimension === 'customer'" v-model:value="selectedCustomer" :options="filteredCustomerOptions" style="width: 180px" placeholder="客户" allow-clear show-search @search="(val: string) => customerSearchValue = val" />
             <a-button type="primary" @click="refresh">刷新</a-button>
           </a-space>
         </template>
@@ -172,7 +172,7 @@
 
 <script setup lang="ts">
 import { useAuthStore } from '@/store/auth';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import KpiCard from '@/components/dashboard/KpiCard.vue';
 import ChartWidget from '@/components/dashboard/ChartWidget.vue';
 import InlineInsights from '@/components/dashboard/InlineInsights.vue';
@@ -431,10 +431,10 @@ async function fetchMetrics() {
       params.customer = selectedCustomer.value;
     } else if (drillLevel.value === 1) {
       params.dimension = drillDim.value;
-      params.department = drillDept.value;
+      // Removed: drillDept is not a department, do not pass as bgbu_filter
     } else {
       params.dimension = 'sales_product';
-      params.department = drillDept.value;
+      // Removed: drillDept is not a department, do not pass as bgbu_filter
       if (drillDim.value === 'product_line') {
         params.product = drillEntity.value;
       } else {
@@ -475,14 +475,18 @@ async function fetchOptions() {
 function refresh() { fetchMetrics(); }
 
 // Ignore filter changes when in drill mode
-watch([periodDimension, selectedPeriod, compareBase, selectedDept, selectedCustomer, periodStart, periodEnd], () => {
+// Guard: prevent double-fetch during onMounted
+let _mounted = false;
+
+watch([periodDimension, selectedPeriod, compareBase, selectedDept, selectedCustomer, secondaryDimension, periodStart, periodEnd], () => {
+  if (!_mounted) return;
   if (drillLevel.value === 0) {
     fetchMetrics();
     loadRecommendations();
   }
 });
 
-onMounted(async () => { await fetchOptions(); await fetchMetrics(); loadRecommendations(); });
+onMounted(async () => { await fetchOptions(); await nextTick(); _mounted = true; fetchMetrics(); loadRecommendations(); });
 </script>
 
 <style scoped lang="less">

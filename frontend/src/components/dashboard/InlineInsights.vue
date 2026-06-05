@@ -67,7 +67,8 @@ function handleDrill(insight: InlineInsight) {
 
 <style scoped lang="less">
 .inline-insights {
-  background: var(--color-bg-container, #fff);
+  background: #fff8f8;
+  border: 1px solid #ffccc7;
   border-radius: 8px;
   padding: 16px;
   margin-top: 16px;
@@ -80,11 +81,11 @@ function handleDrill(insight: InlineInsight) {
   gap: 8px;
   margin-bottom: 12px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid #ffccc7;
 
   .header-icon {
     font-size: 18px;
-    color: #faad14;
+    color: #c41d1d;
   }
 
   .header-title {
