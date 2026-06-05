@@ -9,7 +9,7 @@ def check_and_alter():
 
     cur.execute("""SELECT column_name FROM information_schema.columns
         WHERE table_name='income_margin_detail'
-        AND column_name IN ('product_bgbu','product_line')
+        AND column_name IN ('product_bgbu','product_bgbu')
         ORDER BY column_name""")
     cols = [r[0] for r in cur.fetchall()]
     print(f"Found columns: {cols}")
@@ -18,9 +18,9 @@ def check_and_alter():
         print("Dropping product_bgbu...")
         cur.execute("ALTER TABLE income_margin_detail DROP COLUMN product_bgbu")
         print("  done")
-    if 'product_line' in cols:
-        print("Renaming product_line -> product_bgbu...")
-        cur.execute("ALTER TABLE income_margin_detail RENAME COLUMN product_line TO product_bgbu")
+    if 'product_bgbu' in cols:
+        print("Renaming product_bgbu -> product_bgbu...")
+        cur.execute("ALTER TABLE income_margin_detail RENAME COLUMN product_bgbu TO product_bgbu")
         print("  done")
 
     conn.commit()

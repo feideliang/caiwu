@@ -149,7 +149,7 @@ class TransactionService:
         page: int = 1, page_size: int = 20,
         department: str | None = None,
     ) -> tuple[list[dict], int]:
-        # Use agg_dimension_summary for product_line and sales_product dimensions
+        # Use agg_dimension_summary for product_bgbu and sales_product dimensions
         stmt = select(
             AggDimensionSummary.dim_value,
             AggDimensionSummary.dim_type,
@@ -158,7 +158,7 @@ class TransactionService:
             func.min(AggDimensionSummary.period).label("period_start"),
             func.max(AggDimensionSummary.period).label("period_end"),
         ).where(
-            AggDimensionSummary.dim_type.in_(["product_line", "sales_product"]),
+            AggDimensionSummary.dim_type.in_(["product_bgbu", "sales_product"]),
         )
         if entity:
             stmt = stmt.where(AggDimensionSummary.dim_value == entity)

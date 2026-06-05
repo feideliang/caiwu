@@ -46,7 +46,7 @@ async def get_core_metrics(
             # (either product_bgbu name from ProductAnalysisPage, or product model from frontend drill)
             if not product:
                 product = entity
-        elif dimension == 'product_line' and not product:
+        elif dimension == 'product_bgbu' and not product:
             product = entity
         elif dimension == 'department' and not department:
             department = entity

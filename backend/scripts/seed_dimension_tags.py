@@ -3,14 +3,14 @@
 Task #8 (P1.2): ensure every row in financial_data carries the four canonical
 dimensions used by metrics_service / insight_rule_service:
   - customer
-  - product_line
+  - product_bgbu
   - bu
   - region
 And add the missing `project_name` dimension to support project-level drilldowns.
 
 Strategy:
   1. NULL-tags rows  → derive deterministic dimensions from id + entity + period.
-  2. transaction_record rows → merge in product_line / department / bu / project_name
+  2. transaction_record rows → merge in product_bgbu / department / bu / project_name
      (they already have customer / region / contract_no).
   3. p0_metrics rows → merge in project_name (already have everything else).
 
@@ -117,7 +117,7 @@ def backfill_null_tags(conn) -> int:
 
 
 def enrich_existing_tags(conn) -> int:
-    """For rows that already have tags but miss product_line / project_name / bu / department,
+    """For rows that already have tags but miss product_bgbu / project_name / bu / department,
     merge in the missing keys deterministically.
     """
     rows = conn.execute(text(

@@ -143,9 +143,18 @@ async def _fetch_metric_values(
 
     if agg_col is not None:
         # Use aggregated table
-        stmt = select(AggPeriodSummary.period, agg_col).where(
-            AggPeriodSummary.bgbu == (department or "ALL")
-        )
+        bgbu = department or "ALL"
+        if bgbu == "ALL":
+            # Aggregate across all departments (no per-company "ALL" rows)
+            stmt = (
+                select(AggPeriodSummary.period, func.sum(agg_col))
+                .where(AggPeriodSummary.bgbu != "ALL")
+                .group_by(AggPeriodSummary.period)
+            )
+        else:
+            stmt = select(AggPeriodSummary.period, agg_col).where(
+                AggPeriodSummary.bgbu == bgbu
+            )
         if period_start:
             stmt = stmt.where(AggPeriodSummary.period >= period_start)
         if period_end:
@@ -153,6 +162,8 @@ async def _fetch_metric_values(
         stmt = stmt.order_by(AggPeriodSummary.period)
 
         result = await db.execute(stmt)
+        if department is None:
+            return [(row[0], float(row[1] or 0)) for row in result.all()]
         return [(row[0], float(row[1] or 0)) for row in result.all()]
 
     # Unknown metric: no data source available (financial_data table is empty)

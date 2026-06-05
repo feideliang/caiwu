@@ -167,7 +167,7 @@ async function fetchFilterOptions() {
     marketLineOptions.value = depts.map((v) => ({ label: v, value: v }));
 
     // Product line options
-    const { data: prodResp } = await getFilterOptions({ dimension: 'product_line' });
+    const { data: prodResp } = await getFilterOptions({ dimension: 'product_bgbu' });
     const prods = ((prodResp.data as any)?.options || []) as string[];
     productOptions.value = prods.map((v) => ({ label: v, value: v }));
   } finally {

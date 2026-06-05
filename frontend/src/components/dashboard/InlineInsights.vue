@@ -31,7 +31,7 @@ const router = useRouter();
 const props = withDefaults(defineProps<{
   breakdowns: BreakdownItem[];
   summary?: CoreMetricsSummary;
-  dimension?: 'department' | 'product_line' | 'company' | 'customer';
+  dimension?: 'department' | 'product_bgbu' | 'company' | 'customer';
   trendSeries?: TrendDataPoint[];
   maxCount?: number;
 }>(), {

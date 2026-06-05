@@ -89,7 +89,7 @@
             <a-select-option value="revenue_daily">收入日报</a-select-option>
             <a-select-option value="gross_profit_daily">毛利日报</a-select-option>
             <a-select-option value="department_daily">部门经营日报</a-select-option>
-            <a-select-option value="product_line_daily">产品线分析日报</a-select-option>
+            <a-select-option value="product_bgbu_daily">产品线分析日报</a-select-option>
             <a-select-option value="custom">自定义</a-select-option>
           </a-select>
         </a-form-item>
@@ -149,7 +149,7 @@ const reportTypeLabels: Record<string, string> = {
   revenue_daily: '收入日报',
   gross_profit_daily: '毛利日报',
   department_daily: '部门经营日报',
-  product_line_daily: '产品线分析日报',
+  product_bgbu_daily: '产品线分析日报',
   custom: '自定义',
 };
 

@@ -102,14 +102,14 @@ async def get_filter_options(
                 options = [m for m in all_metrics if not prefix or m.startswith(prefix)]
                 return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})
 
-        # Tag-based dimensions: department, product, product_bgbu, product_line, customer
-        if dimension in ("department", "product", "product_bgbu", "product_line", "customer"):
+        # Tag-based dimensions: department, product, product_bgbu, product_bgbu, customer
+        if dimension in ("department", "product", "product_bgbu", "product_bgbu", "customer"):
             # Map to agg table dim_type
             dim_type_map = {
                 "department": None,  # from period_summary bgbu
-                "product_bgbu": "product_line",
-                "product_line": "product_line",
-                "product": "product_line",
+                "product_bgbu": "product_bgbu",
+                "product_bgbu": "product_bgbu",
+                "product": "product_bgbu",
                 "customer": "customer",
             }
             bgbu = department if department else (user.department if (user.role != "admin" and user.department) else "ALL")

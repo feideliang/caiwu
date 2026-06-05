@@ -83,7 +83,7 @@ async def list_insights(
             db=db, period=period, dimension="customer",
         )
         product_metrics = await MetricsService.get_core_metrics(
-            db=db, period=period, dimension="product_line",
+            db=db, period=period, dimension="product_bgbu",
         )
         rule_items = await InsightRuleService.generate_insights(
             metrics,

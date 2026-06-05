@@ -1,4 +1,4 @@
-"""Check distinct product_line values in financial_data."""
+"""Check distinct product_bgbu values in financial_data."""
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from sqlalchemy import create_engine, text
@@ -21,7 +21,7 @@ with engine.connect() as conn:
         WHERE metric_name = 'revenue' AND period LIKE '2026-%'
         ORDER BY 1
     """))
-    print("=== Distinct product_line values (2026) ===")
+    print("=== Distinct product_bgbu values (2026) ===")
     for row in r:
         print(f"  {row[0]}")
 
@@ -32,7 +32,7 @@ with engine.connect() as conn:
         GROUP BY tags->>'product_bgbu'
         ORDER BY 3 DESC
     """))
-    print("\n=== Revenue by product_line (2026) ===")
+    print("\n=== Revenue by product_bgbu (2026) ===")
     for row in r2:
         print(f"  {row[0]}: count={row[1]}, sum={row[2]:,.0f}")
 

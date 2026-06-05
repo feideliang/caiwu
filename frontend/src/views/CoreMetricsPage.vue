@@ -320,7 +320,7 @@ const departmentScope = ref<string | undefined>();
 
 const dimensionOptions = [
   { label: '客户', value: 'customer' },
-  { label: '产品线', value: 'product_line' },
+  { label: '产品线', value: 'product_bgbu' },
   { label: '部门', value: 'department' },
   { label: '公司整体', value: 'company' },
 ];
@@ -329,7 +329,7 @@ const crossDimensionOptions = computed<Array<{ label: string; value: string }>>(
   if (dimension.value === 'company' || !selectedEntity.value) return [];
   const all = [
     { label: '客户', value: 'customer' },
-    { label: '产品线', value: 'product_line' },
+    { label: '产品线', value: 'product_bgbu' },
     { label: '部门', value: 'department' },
   ];
   return all.filter((o) => o.value !== dimension.value);
@@ -621,7 +621,7 @@ const assistantContext = computed(() => ({
   period_start: periodStart.value,
   period_end: periodEnd.value,
   department: dimension.value === 'department' ? selectedEntity.value : undefined,
-  product: dimension.value === 'product_line' ? selectedEntity.value : undefined,
+  product: dimension.value === 'product_bgbu' ? selectedEntity.value : undefined,
   customer: dimension.value === 'customer' ? selectedEntity.value : undefined,
   active_section: 'change_analysis',
   // Pass the actual page data for AI to analyze
@@ -635,7 +635,7 @@ async function loadRecommendations() {
     const extra: Record<string, string | undefined> = {};
     if (dimension.value === 'customer' && selectedEntity.value) {
       extra.customer = selectedEntity.value;
-    } else if (dimension.value === 'product_line' && selectedEntity.value) {
+    } else if (dimension.value === 'product_bgbu' && selectedEntity.value) {
       extra.product = selectedEntity.value;
     } else if (dimension.value === 'department') {
       extra.department = selectedEntity.value || (authStore.isDeptRestricted ? authStore.department : undefined);
@@ -669,7 +669,7 @@ async function fetchMetrics() {
     const crossDimExtra: Record<string, string | undefined> = {};
     if (crossDimension.value && selectedEntity.value) {
       if (dimension.value === 'customer') crossDimExtra.customer = selectedEntity.value;
-      else if (dimension.value === 'product_line') crossDimExtra.product = selectedEntity.value;
+      else if (dimension.value === 'product_bgbu') crossDimExtra.product = selectedEntity.value;
       else if (dimension.value === 'department') crossDimExtra.department = selectedEntity.value;
     }
     const { data: resp } = await getCoreMetrics({
@@ -756,7 +756,7 @@ watch([periodDimension, selectedPeriod, dimension, periodStart, periodEnd, selec
   if (!newSP) return;
   if (_oldDim !== newDim || _oldCompare !== newCompare) {
     // Clear entity immediately when dimension changes to prevent stale entity
-    // from being sent with new dimension (e.g., product_line entity sent to customer dimension)
+    // from being sent with new dimension (e.g., product_bgbu entity sent to customer dimension)
     selectedEntity.value = undefined;
     // Clear department filter when leaving department dimension to avoid stale filtering
     if (_oldDim === 'department' && newDim !== 'department') {

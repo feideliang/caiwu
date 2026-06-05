@@ -67,7 +67,7 @@ async def _build_kpis(
 
     # Determine dimension based on active filters
     if product:
-        dim = "product_line"
+        dim = "product_bgbu"
     elif department:
         dim = "department"
     elif customer:
@@ -169,7 +169,7 @@ async def _build_dimension_breakdowns(
     prod_response = await MetricsService.get_core_metrics(
         db=db,
         period=period,
-        dimension="product_line",
+        dimension="product_bgbu",
         compare=period_compare_type or "yoy",
         period_dimension=period_dimension or "monthly",
         period_start=period_start,
@@ -280,11 +280,11 @@ async def _build_dashboard_response(body, db: AsyncSession, cache_key: str, user
                 eff_bgbu = "ALL"
 
             if body.product:
-                # Product filter: read from AggDimensionSummary with product_line dim_type
+                # Product filter: read from AggDimensionSummary with product_bgbu dim_type
                 stmt_chart = (
                     select(AggDimensionSummary)
                     .where(
-                        AggDimensionSummary.dim_type == "product_line",
+                        AggDimensionSummary.dim_type == "product_bgbu",
                         AggDimensionSummary.dim_value == body.product,
                     )
                 )

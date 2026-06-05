@@ -2,10 +2,10 @@
 
 Inserts financial_data rows with rich tags to enable:
 - Customer concentration rule (single customer > 30% revenue)
-- Product concentration rule (single product_line > 40% gross_profit)
+- Product concentration rule (single product_bgbu > 40% gross_profit)
 - High-margin order ratio (order-level rev/cost/gp via tags.order_id)
 - Trend-up rules (consecutive MoM positive in last 3 months)
-- Multi-dimension breakdowns (customer / product_line / order_id / department)
+- Multi-dimension breakdowns (customer / product_bgbu / order_id / department)
 
 Idempotent: deletes prior mock rows (tagged with mock_source=p0_metrics) before re-seeding.
 """
@@ -99,7 +99,7 @@ ORDER_CATEGORIES = ["标准订单", "项目订单", "框架订单", "定制订�
 # Sales types
 SALES_TYPES = ["内销", "外销"]
 
-# Product drill-down: sales_product_name per product_line
+# Product drill-down: sales_product_name per product_bgbu
 PRODUCT_MODEL_CODES = {
     "企业网络": ["EN3000", "EN5000", "EN7000"],
     "无线产品": ["WP2000", "WP4000", "WP6000"],

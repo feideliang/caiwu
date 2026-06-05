@@ -3,7 +3,7 @@
 Creates composite and GIN indexes to speed up the most common queries:
 - Dashboard BFF: period + metric_name aggregation
 - Core metrics: period + metric_name filtering
-- Dimension breakdowns: tags JSON queries (department, product_line, customer)
+- Dimension breakdowns: tags JSON queries (department, product_bgbu, customer)
 """
 
 import os

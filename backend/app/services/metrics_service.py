@@ -183,13 +183,23 @@ class MetricsService:
 
     @staticmethod
     async def _list_periods(db: AsyncSession, bgbu_filter: str = "ALL", limit: int = 24) -> list[str]:
-        stmt = (
-            select(AggPeriodSummary.period)
-            .where(AggPeriodSummary.bgbu == bgbu_filter)
-            .distinct()
-            .order_by(desc(AggPeriodSummary.period))
-            .limit(limit)
-        )
+        # When bgbu_filter is "ALL", query all distinct periods across all departments
+        # (no per-company "ALL" rows exist in AggPeriodSummary)
+        if bgbu_filter == "ALL":
+            stmt = (
+                select(AggPeriodSummary.period)
+                .distinct()
+                .order_by(desc(AggPeriodSummary.period))
+                .limit(limit)
+            )
+        else:
+            stmt = (
+                select(AggPeriodSummary.period)
+                .where(AggPeriodSummary.bgbu == bgbu_filter)
+                .distinct()
+                .order_by(desc(AggPeriodSummary.period))
+                .limit(limit)
+            )
         return [row[0] for row in (await db.execute(stmt)).all() if row[0]]
 
     @staticmethod
@@ -217,7 +227,7 @@ class MetricsService:
         # ── Map entity parameter to dimension-specific params ──
         # Frontend uses 'entity' generically; backend needs dimension-specific param names
         if entity:
-            if dimension == 'product_line' and not product:
+            if dimension == 'product_bgbu' and not product:
                 product = entity
             elif dimension == 'customer' and not customer:
                 customer = entity
@@ -387,7 +397,7 @@ class MetricsService:
         _is_company_dim = dimension == "company"
         _is_dept_dim = dimension == "department"
         _is_customer_dim = dimension == "customer"
-        _is_product_dim = dimension == "product_line"
+        _is_product_dim = dimension == "product_bgbu"
 
         # ── 1. Period summary (replaces B1 + B6b + target_q + ds_q) ──
         period_bucket: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -464,7 +474,7 @@ class MetricsService:
             else:
                 ps_q = select(AggPeriodSummary).where(
                     AggPeriodSummary.period.in_(list(_trend_period_pool)),
-                    AggPeriodSummary.bgbu == bgbu_filter,
+                    AggPeriodSummary.bgbu == bgbu_filter if bgbu_filter != "ALL" else AggPeriodSummary.bgbu != "ALL",
                 )
                 ps_rows = (await db.execute(ps_q)).scalars().all()
                 for row in ps_rows:
@@ -482,7 +492,7 @@ class MetricsService:
         # ── 2. Dimension summary (replaces B2/B3/B4/B5/B7) ──
         # Map dimension parameter → dim_type in agg table
         _dim_type_map = {
-            "product_line": "product_line",
+            "product_bgbu": "product_bgbu",
             "sales_product": "sales_product",
             "customer": "customer",
             "contract_type": "contract_type",
@@ -518,7 +528,7 @@ class MetricsService:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["cost"] += float(row[3] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
                 elif product and dimension == 'sales_product':
-                    # Product drill-down: entity could be product_line (product line)
+                    # Product drill-down: entity could be product_bgbu (product line)
                     # or sales_product_name (specific product model like RG-CT5502C-G4)
                     # Try both in a single query with OR
                     imd_sp_prod_q = (
@@ -544,8 +554,8 @@ class MetricsService:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["revenue"] += float(row[2] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["cost"] += float(row[3] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
-                elif customer and dimension == 'product_line':
-                    # Customer filter on product_line dimension: query IncomeMarginDetail by superior_name, group by product_bgbu
+                elif customer and dimension == 'product_bgbu':
+                    # Customer filter on product_bgbu dimension: query IncomeMarginDetail by superior_name, group by product_bgbu
                     imd_pl_cust_q = (
                         select(
                             IncomeMarginDetail.period,
@@ -566,8 +576,8 @@ class MetricsService:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["revenue"] += float(row[2] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["cost"] += float(row[3] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
-                elif product and dimension == 'product_line':
-                    # Product filter on product_line dimension: query IncomeMarginDetail directly
+                elif product and dimension == 'product_bgbu':
+                    # Product filter on product_bgbu dimension: query IncomeMarginDetail directly
                     # AggDimensionSummary.dim_value may not match IncomeMarginDetail.product_bgbu
                     imd_pl_q = (
                         select(
@@ -593,21 +603,33 @@ class MetricsService:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["order_count"] += int(row[5] or 0)
                 else:
-                    dim_q = select(AggDimensionSummary).where(
+                    # Use explicit GROUP BY query (more reliable than full-row fetch)
+                    dim_q = select(
+                        AggDimensionSummary.period,
+                        AggDimensionSummary.dim_value,
+                        func.sum(AggDimensionSummary.revenue).label("revenue"),
+                        func.sum(AggDimensionSummary.cost).label("cost"),
+                        func.sum(AggDimensionSummary.gross_profit).label("gross_profit"),
+                        func.sum(AggDimensionSummary.order_count).label("order_count"),
+                    ).where(
                         AggDimensionSummary.period.in_(list(detail_periods)),
                         AggDimensionSummary.bgbu == bgbu_filter,
                         AggDimensionSummary.dim_type == dim_type_key,
                     )
-                    if product and dimension == 'product_line':
+                    if product and dimension == 'product_bgbu':
                         dim_q = dim_q.where(AggDimensionSummary.dim_value == product)
                     if customer and dimension == 'customer':
                         dim_q = dim_q.where(AggDimensionSummary.dim_value == customer)
-                    dim_rows = (await db.execute(dim_q)).scalars().all()
+                    dim_q = dim_q.group_by(
+                        AggDimensionSummary.period,
+                        AggDimensionSummary.dim_value,
+                    )
+                    dim_rows = (await db.execute(dim_q)).all()
                     for row in dim_rows:
-                        period_dim_bucket[row.period][row.dim_value]["revenue"] += float(row.revenue or 0)
-                        period_dim_bucket[row.period][row.dim_value]["cost"] += float(row.cost or 0)
-                        period_dim_bucket[row.period][row.dim_value]["gross_profit"] += float(row.gross_profit or 0)
-                        period_dim_bucket[row.period][row.dim_value]["order_count"] += int(row.order_count or 0)
+                        period_dim_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
+                        period_dim_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
+                        period_dim_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
+                        period_dim_bucket[row[0]][row[1]]["order_count"] += int(row[5] or 0)
 
         # Department breakdown: from period_summary per-bgbu rows
         period_dept_bucket: dict[str, dict[str, dict[str, float]]] = defaultdict(
@@ -761,7 +783,7 @@ class MetricsService:
             lambda: defaultdict(lambda: defaultdict(float))
         )
         if _is_product_dim:
-            # Bridge from period_dim_bucket when dimension IS product_line
+            # Bridge from period_dim_bucket when dimension IS product_bgbu
             for p, dim_bk in period_dim_bucket.items():
                 for dv, bk in dim_bk.items():
                     for bkt, val in bk.items():
@@ -897,7 +919,7 @@ class MetricsService:
                     func.sum(case((AggOrderSummary.gross_profit < 0, AggOrderSummary.gross_profit), else_=0)).label("neg_margin_amount"),
                 ).where(
                     AggOrderSummary.period.in_(list(current_members)),
-                    AggOrderSummary.bgbu == "ALL",
+                    AggOrderSummary.bgbu != "ALL",
                     AggOrderSummary.dim_dept.isnot(None),
                 ).group_by(AggOrderSummary.dim_dept)
                 for dept, cnt, neg_cnt, neg_amt in (await db.execute(ord_dim_q)).all():
@@ -1703,7 +1725,7 @@ class MetricsService:
                 calculable=(c_rev is not None and c_gp is not None),
             ))
 
-        # ── Product line breakdown (query product_line dim_type directly) ─
+        # ── Product line breakdown (query product_bgbu dim_type directly) ─
         product_bgbu_breakdown: list[BreakdownItem] = []
         if need_breakdowns or need_summary:
             pl_q = select(
@@ -1714,7 +1736,7 @@ class MetricsService:
             ).where(
                 AggDimensionSummary.period.in_(list(current_members)),
                 AggDimensionSummary.bgbu == bgbu_filter,
-                AggDimensionSummary.dim_type == "product_line",
+                AggDimensionSummary.dim_type == "product_bgbu",
             ).group_by(AggDimensionSummary.dim_value)
             pl_rows = (await db.execute(pl_q)).all()
             total_pl_rev = sum(float(r[1] or 0) for r in pl_rows)
@@ -1736,6 +1758,28 @@ class MetricsService:
                         gross_margin_contribution=_round(p_contrib),
                         calculable=(p_rev is not None and p_gp is not None),
                     ))
+
+        # ── Fix: if dimension is product_bgbu and main breakdowns is empty,
+        # populate from product_bgbu_breakdown (uses same data source) ──
+        if dimension == "product_bgbu" and not breakdowns and product_bgbu_breakdown:
+            # Re-fetch YoY data for revenue_yoy_growth on each item
+            yoy_dim_buckets = _sum_nested_bucket_values(
+                period_dim_bucket, _period_members(yoy_curr)
+            ) if yoy_curr and period_dim_bucket else {}
+            total_gp_for_contrib = sum(
+                (b.gross_profit or 0) for b in product_bgbu_breakdown
+            )
+            for item in product_bgbu_breakdown:
+                item_yoy_bk = yoy_dim_buckets.get(item.dimension_value, {})
+                item_yoy_rev = item_yoy_bk.get("revenue")
+                item_yoy_growth = (
+                    _safe_div(item.revenue - item_yoy_rev, item_yoy_rev) * 100
+                ) if (item.revenue is not None and item_yoy_rev) else None
+                item.revenue_yoy_growth = _round(item_yoy_growth)
+                item.gross_margin_contribution = _round(
+                    _safe_div(item.gross_profit, total_gp_for_contrib) * 100
+                ) if total_gp_for_contrib else None
+            breakdowns = list(product_bgbu_breakdown)
 
         # ── Contract type breakdown ───────────────────────────────
         contract_type_breakdown: list[BreakdownItem] = []

@@ -49,7 +49,7 @@
     </div>
     <div class="analysis-content">
       <!-- Insight Cards -->
-      <InlineInsights :breakdowns="displayBreakdowns" :summary="summary" dimension="product_line" :max-count="5" class="section" />
+      <InlineInsights :breakdowns="displayBreakdowns" :summary="summary" dimension="product_bgbu" :max-count="5" class="section" />
 
       <!-- KPI Cards (4) -->
       <a-row :gutter="[16, 16]" class="kpi-row">
@@ -201,8 +201,8 @@ const metricsData = ref<CoreMetricsResponse | null>(null);
 const drillMode = ref(false);
 const drillProduct = ref<string | undefined>();
 
-// Current dimension: product_line or sales_product (drill-down)
-const currentDimension = computed(() => drillMode.value ? 'sales_product' : 'product_line');
+// Current dimension: product_bgbu or sales_product (drill-down)
+const currentDimension = computed(() => drillMode.value ? 'sales_product' : 'product_bgbu');
 
 // Derived period
 const period = computed(() => {
@@ -243,7 +243,7 @@ const displayBreakdowns = computed<BreakdownItem[]>(() => {
   if (secondaryDimension.value !== 'customer') {
     return metricsData.value?.customer_breakdown || [];
   }
-  // Default: show product_line breakdowns (filtered by selectedProduct on backend)
+  // Default: show product_bgbu breakdowns (filtered by selectedProduct on backend)
   return metricsData.value?.breakdowns || [];
 });
 
@@ -399,7 +399,7 @@ async function fetchOptions() {
     if (!selectedPeriod.value && periods.length) {
       selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
     }
-    const { data: prodResp } = await getFilterOptions({ dimension: 'product_line' });
+    const { data: prodResp } = await getFilterOptions({ dimension: 'product_bgbu' });
     const prods = ((prodResp.data as any)?.options || []) as string[];
     productOptions.value = prods.map((v) => ({ label: v, value: v }));
   } catch { /* interceptor handles errors */ }
