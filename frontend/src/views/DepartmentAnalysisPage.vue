@@ -197,7 +197,7 @@ const periodDimension = ref<string>('cumulative');
 const selectedPeriod = ref<string | undefined>();
 const compareBase = ref<string>('yoy');
 const selectedDept = ref<string | undefined>();
-const secondaryDimension = ref<string>('product_bgbu');
+const secondaryDimension = ref<string | undefined>(undefined);
 const selectedCustomer = ref<string | undefined>();
 const customRange = ref<[any, any] | null>(null);
 const periodStart = ref<string | undefined>();
@@ -253,6 +253,10 @@ const breakdowns = computed<BreakdownItem[]>(() => metricsData.value?.breakdowns
 
 // Secondary dimension toggle: switch between product_bgbu and customer breakdown
 const displayBreakdowns = computed<BreakdownItem[]>(() => {
+  // When no secondary dimension selected, show department breakdowns (default)
+  if (!secondaryDimension.value) {
+    return breakdowns.value;
+  }
   if (secondaryDimension.value === 'customer') {
     return metricsData.value?.customer_breakdown || [];
   }

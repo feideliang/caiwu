@@ -383,7 +383,7 @@ function refresh() { fetchMetrics(); }
 // Guard: prevent double-fetch when fetchOptions sets selectedPeriod during onMounted
 let _mounted = false;
 
-watch([periodDimension, selectedPeriod, compareBase, selectedCustomer, periodStart, periodEnd], () => {
+watch([periodDimension, selectedPeriod, compareBase, selectedCustomer, periodStart, periodEnd, secondaryDimension], () => {
   if (!_mounted) return;
   if (!drillMode.value) {
     fetchMetrics();

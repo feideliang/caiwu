@@ -188,7 +188,7 @@ const periodDimension = ref<string>('cumulative');
 const selectedPeriod = ref<string | undefined>();
 const compareBase = ref<string>('yoy');
 const selectedProduct = ref<string | undefined>();
-const secondaryDimension = ref<string>('customer');
+const secondaryDimension = ref<string | undefined>(undefined);
 const customRange = ref<[any, any] | null>(null);
 const periodStart = ref<string | undefined>();
 const periodEnd = ref<string | undefined>();
@@ -231,20 +231,19 @@ watch(periodDimension, () => {
 const summary = computed(() => metricsData.value?.summary);
 
 // Secondary dimension toggle: switch between customer and contract_type breakdown
-// Only switches when user explicitly toggles, not automatically when product is selected
 const displayBreakdowns = computed<BreakdownItem[]>(() => {
   if (drillMode.value) {
     return metricsData.value?.breakdowns || [];
   }
-  // Only switch to secondary dimension when user has explicitly toggled away from default
+  // When no secondary dimension selected, show product_bgbu breakdowns (default)
+  if (!secondaryDimension.value) {
+    return metricsData.value?.breakdowns || [];
+  }
   if (secondaryDimension.value === 'contract_type') {
     return metricsData.value?.contract_type_breakdown || [];
   }
-  if (secondaryDimension.value !== 'customer') {
-    return metricsData.value?.customer_breakdown || [];
-  }
-  // Default: show product_bgbu breakdowns (filtered by selectedProduct on backend)
-  return metricsData.value?.breakdowns || [];
+  // secondaryDimension === 'customer': show customer breakdown
+  return metricsData.value?.customer_breakdown || [];
 });
 
 const secondaryDimLabel = computed(() => {
@@ -410,7 +409,7 @@ function refresh() { fetchMetrics(); }
 // Guard: prevent double-fetch during onMounted
 let _mounted = false;
 
-watch([periodDimension, selectedPeriod, compareBase, selectedProduct, periodStart, periodEnd], () => {
+watch([periodDimension, selectedPeriod, compareBase, selectedProduct, periodStart, periodEnd, secondaryDimension], () => {
   if (!_mounted) return;
   if (!drillMode.value) {
     fetchMetrics();

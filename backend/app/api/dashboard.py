@@ -91,6 +91,7 @@ async def _build_kpis(
         customer=customer,
         bgbu_filter=bgbu_filter,
         sections={"summary", "trend_series"},
+        skip_order_metrics=True,
     )
     yoy = await MetricsService.get_core_metrics(
         db=db,
@@ -105,6 +106,7 @@ async def _build_kpis(
         customer=customer,
         bgbu_filter=bgbu_filter,
         sections={"summary", "trend_series"},
+        skip_order_metrics=True,
     )
     summary = current.summary
     yoy_summary = yoy.summary
@@ -165,6 +167,7 @@ async def _build_dimension_breakdowns(
         department=department,
         bgbu_filter=bgbu_filter,
         sections={"breakdowns"},
+        skip_order_metrics=True,
     )
     prod_response = await MetricsService.get_core_metrics(
         db=db,
@@ -178,6 +181,7 @@ async def _build_dimension_breakdowns(
         department=department,
         bgbu_filter=bgbu_filter,
         sections={"breakdowns"},
+        skip_order_metrics=True,
     )
     return (
         [item.model_dump() for item in dept_response.breakdowns],

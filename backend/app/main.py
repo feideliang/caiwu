@@ -50,6 +50,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Celery app not available; async tasks will not run")
 
+    # Start midnight insights scheduler
+    try:
+        from app.api.insights import start_insights_scheduler
+        start_insights_scheduler()
+        logger.info("Insights midnight scheduler started")
+    except Exception as exc:
+        logger.warning("Failed to start insights scheduler: %s", exc)
+
     yield
     await close_db()
     await close_redis()

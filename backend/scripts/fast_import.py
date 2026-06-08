@@ -38,7 +38,6 @@ COL_MAP = {
     "产品所属事业部": "product_bgbu",
     "产品所属组织": "product_org",
     "产品系列": "series",
-    "产品线": "product_bgbu",
     "产品族(产品线说明)": "product_family",
     "销售产品代码": "sales_product_code",
     "销售产品名称": "sales_product_name",
@@ -98,7 +97,7 @@ INSERT_COLS = [
     "sales_person_code", "sales_person",
     "product_category", "product_classification", "product_bu_code",
     "product_bu_name", "product_bgbu", "product_org", "series",
-    "product_bgbu", "product_family", "sales_product_code", "sales_product_name",
+    "product_family", "sales_product_code", "sales_product_name",
     "material_code", "material_desc", "material_cost_category",
     "cost_class_1", "cost_class_2", "cost_class_3",
     "ncc_customer_code", "final_customer",
@@ -148,6 +147,10 @@ async def main():
 
     # Entity = company
     df["entity"] = df.get("company")
+
+    # product_bgbu should use 产品事业部名称 when 产品所属事业部 is absent/blank
+    if "product_bgbu" in df.columns and "product_bu_name" in df.columns:
+        df["product_bgbu"] = df["product_bgbu"].where(df["product_bgbu"].notna(), df["product_bu_name"])
 
     # Keep only insert columns
     missing = [c for c in INSERT_COLS if c not in df.columns]

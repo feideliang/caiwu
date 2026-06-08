@@ -62,9 +62,9 @@ SELECT period, bgbu,
     COALESCE(SUM(revenue_amount), 0), COALESCE(SUM(cost_amount), 0),
     COALESCE(SUM(gross_profit_amount), 0),
     COUNT(DISTINCT COALESCE(order_id, contract_no)),
-    COALESCE(SUM(revenue_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0),
-    COALESCE(SUM(cost_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0),
-    COALESCE(SUM(gross_profit_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0)
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN revenue_amount ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN cost_amount ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN gross_profit_amount ELSE 0 END), 0)
 FROM income_margin_detail WHERE bgbu IS NOT NULL
 GROUP BY period, bgbu
 UNION ALL
@@ -72,9 +72,9 @@ SELECT period, 'ALL',
     COALESCE(SUM(revenue_amount), 0), COALESCE(SUM(cost_amount), 0),
     COALESCE(SUM(gross_profit_amount), 0),
     COUNT(DISTINCT COALESCE(order_id, contract_no)),
-    COALESCE(SUM(revenue_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0),
-    COALESCE(SUM(cost_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0),
-    COALESCE(SUM(gross_profit_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0)
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN revenue_amount ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN cost_amount ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN gross_profit_amount ELSE 0 END), 0)
 FROM income_margin_detail
 GROUP BY period
 """

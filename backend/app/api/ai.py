@@ -1422,9 +1422,11 @@ async def get_analysis_recommendations(
         customer=cust_param,
     )
 
-    # Fetch department breakdown if needed
+    request_dimension = (body.dimension or "").strip()
+
+    # Fetch department breakdown if needed. For core_metrics, only fetch the active dimension.
     dept_items = []
-    if body.page_type in ("department", "dashboard", "core_metrics"):
+    if body.page_type in ("department", "dashboard") or (body.page_type == "core_metrics" and request_dimension == "department"):
         result = await MetricsService.get_core_metrics(
             db=db,
             period=body.period,
@@ -1436,9 +1438,9 @@ async def get_analysis_recommendations(
         )
         dept_items = [b.model_dump() for b in result.breakdowns]
 
-    # Fetch product breakdown
+    # Fetch product breakdown. For core_metrics, only fetch the active dimension.
     prod_items = []
-    if body.page_type in ("product", "dashboard", "core_metrics"):
+    if body.page_type in ("product", "dashboard") or (body.page_type == "core_metrics" and request_dimension in ("product_bgbu", "sales_product")):
         result = await MetricsService.get_core_metrics(
             db=db,
             period=body.period,
@@ -1451,9 +1453,9 @@ async def get_analysis_recommendations(
         )
         prod_items = [b.model_dump() for b in result.breakdowns]
 
-    # Fetch customer breakdown
+    # Fetch customer breakdown. For core_metrics, only fetch when customer is active.
     customer_items = []
-    if body.page_type in ("customer", "dashboard"):
+    if body.page_type in ("customer", "dashboard") or (body.page_type == "core_metrics" and request_dimension == "customer"):
         result = await MetricsService.get_core_metrics(
             db=db,
             period=body.period,
