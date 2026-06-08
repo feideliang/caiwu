@@ -184,7 +184,7 @@ async def drilldown_products_all(
 ) -> APIResponse:
     """Product-level breakdown.
 
-    Uses agg_dimension_summary WHERE dim_type='product_line'.
+    Uses agg_dimension_summary WHERE dim_type='product_bgbu'.
     """
     period_prefix = None if report_id == "default" else report_id
     bgbu = _get_bgbu_filter(user)
@@ -197,7 +197,7 @@ async def drilldown_products_all(
         func.sum(AggDimensionSummary.order_count).label("total_orders"),
     ).where(
         AggDimensionSummary.bgbu == bgbu,
-        AggDimensionSummary.dim_type == "product_line",
+        AggDimensionSummary.dim_type == "product_bgbu",
     )
 
     if period_prefix:
@@ -281,7 +281,7 @@ async def drilldown_products_by_dept(
         func.sum(AggDimensionSummary.order_count).label("total_orders"),
     ).where(
         AggDimensionSummary.bgbu == dept_name,
-        AggDimensionSummary.dim_type == "product_line",
+        AggDimensionSummary.dim_type == "product_bgbu",
     )
 
     if period_prefix:
@@ -457,7 +457,7 @@ async def drilldown_records_flat(
         func.sum(AggDimensionSummary.revenue).label("total_revenue"),
         func.sum(AggDimensionSummary.order_count).label("total_orders"),
     ).where(
-        AggDimensionSummary.dim_type == "product_line",
+        AggDimensionSummary.dim_type == "product_bgbu",
     )
 
     if period_prefix:
@@ -537,7 +537,7 @@ async def drilldown_records(
         select(AggDimensionSummary.dim_value)
         .where(
             AggDimensionSummary.bgbu == dept_name,
-            AggDimensionSummary.dim_type == "product_line",
+            AggDimensionSummary.dim_type == "product_bgbu",
         )
         .group_by(AggDimensionSummary.dim_value)
         .order_by(func.sum(AggDimensionSummary.revenue).desc())

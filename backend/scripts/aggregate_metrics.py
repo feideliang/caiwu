@@ -62,9 +62,9 @@ SELECT period, bgbu,
     COALESCE(SUM(revenue_amount), 0), COALESCE(SUM(cost_amount), 0),
     COALESCE(SUM(gross_profit_amount), 0),
     COUNT(DISTINCT COALESCE(order_id, contract_no)),
-    COALESCE(SUM(revenue_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0),
-    COALESCE(SUM(cost_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0),
-    COALESCE(SUM(gross_profit_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0)
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN revenue_amount ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN cost_amount ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN gross_profit_amount ELSE 0 END), 0)
 FROM income_margin_detail WHERE bgbu IS NOT NULL
 GROUP BY period, bgbu
 UNION ALL
@@ -72,28 +72,28 @@ SELECT period, 'ALL',
     COALESCE(SUM(revenue_amount), 0), COALESCE(SUM(cost_amount), 0),
     COALESCE(SUM(gross_profit_amount), 0),
     COUNT(DISTINCT COALESCE(order_id, contract_no)),
-    COALESCE(SUM(revenue_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0),
-    COALESCE(SUM(cost_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0),
-    COALESCE(SUM(gross_profit_amount) FILTER (WHERE superior_name IN (SELECT DISTINCT superior_name FROM income_margin_detail WHERE contract_type_merged = '直签' AND superior_name IS NOT NULL)), 0)
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN revenue_amount ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN cost_amount ELSE 0 END), 0),
+    COALESCE(SUM(CASE WHEN contract_type_merged = '直签' THEN gross_profit_amount ELSE 0 END), 0)
 FROM income_margin_detail
 GROUP BY period
 """
 
 AGG_DIMENSION = """
 INSERT INTO agg_dimension_summary (period, bgbu, dim_type, dim_value, revenue, cost, gross_profit, order_count)
-SELECT period, bgbu, 'product_line', product_line,
+SELECT period, bgbu, 'product_bgbu', product_bgbu,
     COALESCE(SUM(revenue_amount),0), COALESCE(SUM(cost_amount),0),
     COALESCE(SUM(gross_profit_amount),0),
     COUNT(DISTINCT COALESCE(order_id, contract_no))
-FROM income_margin_detail WHERE bgbu IS NOT NULL AND product_line IS NOT NULL
-GROUP BY period, bgbu, product_line
+FROM income_margin_detail WHERE bgbu IS NOT NULL AND product_bgbu IS NOT NULL
+GROUP BY period, bgbu, product_bgbu
 UNION ALL
-SELECT period, 'ALL', 'product_line', product_line,
+SELECT period, 'ALL', 'product_bgbu', product_bgbu,
     COALESCE(SUM(revenue_amount),0), COALESCE(SUM(cost_amount),0),
     COALESCE(SUM(gross_profit_amount),0),
     COUNT(DISTINCT COALESCE(order_id, contract_no))
-FROM income_margin_detail WHERE product_line IS NOT NULL
-GROUP BY period, product_line
+FROM income_margin_detail WHERE product_bgbu IS NOT NULL
+GROUP BY period, product_bgbu
 UNION ALL
 SELECT period, bgbu, 'sales_product', sales_product_name,
     COALESCE(SUM(revenue_amount),0), COALESCE(SUM(cost_amount),0),
@@ -141,7 +141,7 @@ GROUP BY period, contract_type_merged
 AGG_ORDER = """
 INSERT INTO agg_order_summary (period, bgbu, order_id, dim_dept, dim_product, revenue, cost, gross_profit)
 SELECT period, bgbu, COALESCE(order_id, contract_no),
-    MAX(sales_department), MAX(product_line),
+    MAX(sales_department), MAX(product_bgbu),
     COALESCE(SUM(revenue_amount), 0), COALESCE(SUM(cost_amount), 0),
     COALESCE(SUM(gross_profit_amount), 0)
 FROM income_margin_detail
@@ -149,7 +149,7 @@ WHERE bgbu IS NOT NULL AND COALESCE(order_id, contract_no) IS NOT NULL
 GROUP BY period, bgbu, COALESCE(order_id, contract_no)
 UNION ALL
 SELECT period, 'ALL', COALESCE(order_id, contract_no),
-    MAX(sales_department), MAX(product_line),
+    MAX(sales_department), MAX(product_bgbu),
     COALESCE(SUM(revenue_amount), 0), COALESCE(SUM(cost_amount), 0),
     COALESCE(SUM(gross_profit_amount), 0)
 FROM income_margin_detail

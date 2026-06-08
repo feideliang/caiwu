@@ -48,7 +48,7 @@ def upgrade() -> None:
         sa.Column("bgbu", sa.String(128)),
         sa.Column("org", sa.String(256)),
         sa.Column("series", sa.String(256)),
-        sa.Column("product_line", sa.String(256)),
+        sa.Column("product_bgbu", sa.String(256)),
         sa.Column("family", sa.String(256)),
         sa.Column("material_code", sa.String(128)),
         sa.Column("material_desc", sa.Text),

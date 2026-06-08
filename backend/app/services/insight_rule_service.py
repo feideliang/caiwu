@@ -255,9 +255,9 @@ class InsightRuleService:
                         metric_value=share,
                         threshold=prod_cfg["threshold"],
                         period=period,
-                        dimension="product_line",
+                        dimension="product_bgbu",
                         dimension_value=str(b_name),
-                        drill_type="product_line",
+                        drill_type="product_bgbu",
                     ))
                     break
         elif prod_top3 is not None and prod_top3 > prod_top3_cfg["threshold"]:
@@ -273,7 +273,7 @@ class InsightRuleService:
                 period=period,
                 dimension=dimension,
                 dimension_value=dimension_value,
-                drill_type="product_line",
+                drill_type="product_bgbu",
             ))
 
         return insights

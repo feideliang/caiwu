@@ -49,7 +49,7 @@
     </div>
     <div class="analysis-content">
       <!-- Insight Cards -->
-      <InlineInsights :breakdowns="displayBreakdowns" :summary="summary" dimension="product_line" :max-count="5" class="section" />
+      <InlineInsights :breakdowns="displayBreakdowns" :summary="summary" dimension="product_bgbu" :max-count="5" class="section" />
 
       <!-- KPI Cards (4) -->
       <a-row :gutter="[16, 16]" class="kpi-row">
@@ -188,7 +188,7 @@ const periodDimension = ref<string>('cumulative');
 const selectedPeriod = ref<string | undefined>();
 const compareBase = ref<string>('yoy');
 const selectedProduct = ref<string | undefined>();
-const secondaryDimension = ref<string>('customer');
+const secondaryDimension = ref<string | undefined>(undefined);
 const customRange = ref<[any, any] | null>(null);
 const periodStart = ref<string | undefined>();
 const periodEnd = ref<string | undefined>();
@@ -201,8 +201,8 @@ const metricsData = ref<CoreMetricsResponse | null>(null);
 const drillMode = ref(false);
 const drillProduct = ref<string | undefined>();
 
-// Current dimension: product_line or sales_product (drill-down)
-const currentDimension = computed(() => drillMode.value ? 'sales_product' : 'product_line');
+// Current dimension: product_bgbu or sales_product (drill-down)
+const currentDimension = computed(() => drillMode.value ? 'sales_product' : 'product_bgbu');
 
 // Derived period
 const period = computed(() => {
@@ -231,20 +231,19 @@ watch(periodDimension, () => {
 const summary = computed(() => metricsData.value?.summary);
 
 // Secondary dimension toggle: switch between customer and contract_type breakdown
-// Only switches when user explicitly toggles, not automatically when product is selected
 const displayBreakdowns = computed<BreakdownItem[]>(() => {
   if (drillMode.value) {
     return metricsData.value?.breakdowns || [];
   }
-  // Only switch to secondary dimension when user has explicitly toggled away from default
+  // When no secondary dimension selected, show product_bgbu breakdowns (default)
+  if (!secondaryDimension.value) {
+    return metricsData.value?.breakdowns || [];
+  }
   if (secondaryDimension.value === 'contract_type') {
     return metricsData.value?.contract_type_breakdown || [];
   }
-  if (secondaryDimension.value !== 'customer') {
-    return metricsData.value?.customer_breakdown || [];
-  }
-  // Default: show product_line breakdowns (filtered by selectedProduct on backend)
-  return metricsData.value?.breakdowns || [];
+  // secondaryDimension === 'customer': show customer breakdown
+  return metricsData.value?.customer_breakdown || [];
 });
 
 const secondaryDimLabel = computed(() => {
@@ -399,7 +398,7 @@ async function fetchOptions() {
     if (!selectedPeriod.value && periods.length) {
       selectedPeriod.value = getDefaultPeriod(allPeriods.value, normalizePeriodDimension(periodDimension.value));
     }
-    const { data: prodResp } = await getFilterOptions({ dimension: 'product_line' });
+    const { data: prodResp } = await getFilterOptions({ dimension: 'product_bgbu' });
     const prods = ((prodResp.data as any)?.options || []) as string[];
     productOptions.value = prods.map((v) => ({ label: v, value: v }));
   } catch { /* interceptor handles errors */ }
@@ -410,7 +409,7 @@ function refresh() { fetchMetrics(); }
 // Guard: prevent double-fetch during onMounted
 let _mounted = false;
 
-watch([periodDimension, selectedPeriod, compareBase, selectedProduct, periodStart, periodEnd], () => {
+watch([periodDimension, selectedPeriod, compareBase, selectedProduct, periodStart, periodEnd, secondaryDimension], () => {
   if (!_mounted) return;
   if (!drillMode.value) {
     fetchMetrics();

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime as _dt
+import logging
 import math
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -19,6 +21,98 @@ from app.services.insight_rule_service import InsightRuleService
 from app.services.metrics_service import MetricsService
 
 router = APIRouter(prefix="/insights", tags=["insights"])
+
+
+async def _generate_and_save_insights(db: AsyncSession) -> list[dict]:
+    """Generate rule-based insights and persist to DB."""
+    metrics = await MetricsService.get_core_metrics(
+        db=db, period=None, dimension="company",
+        sections={"summary", "trend_series"},
+    )
+    customer_metrics = await MetricsService.get_core_metrics(
+        db=db, period=None, dimension="customer",
+        sections={"breakdowns"},
+    )
+    product_metrics = await MetricsService.get_core_metrics(
+        db=db, period=None, dimension="product_bgbu",
+        sections={"breakdowns"},
+    )
+    rule_items = await InsightRuleService.generate_insights(
+        metrics,
+        customer_breakdowns=customer_metrics.breakdowns,
+        product_breakdowns=product_metrics.breakdowns,
+    )
+
+    # Persist each insight to DB
+    for item in rule_items:
+        meta = item.get("data_json") or {}
+        key = f"{meta.get('rule_code')}:{meta.get('period')}:{meta.get('dimension')}:{meta.get('dimension_value')}"
+        # Check if already exists
+        existing_stmt = select(Insight).where(
+            Insight.generated_by == "rule",
+            func.jsonb_extract_path_text(Insight.data_json, "rule_code") == meta.get("rule_code"),
+            func.jsonb_extract_path_text(Insight.data_json, "period") == meta.get("period"),
+            func.jsonb_extract_path_text(Insight.data_json, "dimension") == meta.get("dimension"),
+            func.jsonb_extract_path_text(Insight.data_json, "dimension_value") == meta.get("dimension_value"),
+        )
+        existing = (await db.execute(existing_stmt)).scalar_one_or_none()
+        if existing:
+            # Update existing
+            new_data = dict(existing.data_json or {})
+            new_data["__status"] = "unread"
+            new_data["updated_at"] = str(item.get("created_at", ""))
+            existing.data_json = new_data
+        else:
+            # Create new
+            new_insight = Insight(
+                title=item.get("title", ""),
+                insight_type=item.get("type", ""),
+                content=item.get("description", ""),
+                generated_by="rule",
+                data_json={**meta, "__status": "unread"},
+            )
+            db.add(new_insight)
+    await db.commit()
+    return rule_items
+
+
+import asyncio
+import datetime as _dt
+
+
+async def _midnight_scheduler():
+    """Run insight generation at 00:00 daily."""
+    from app.db.session import async_session_factory
+    logger_sched = logging.getLogger(__name__)
+    while True:
+        now = _dt.datetime.now()
+        tomorrow = (now + _dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        wait_seconds = (tomorrow - now).total_seconds()
+        logger_sched.info("Insights scheduler: next run in %.0fs (%s)", wait_seconds, tomorrow.strftime("%Y-%m-%d %H:%M:%S"))
+        await asyncio.sleep(wait_seconds)
+        try:
+            async with async_session_factory() as db:
+                items = await _generate_and_save_insights(db)
+                logger_sched.info("Midnight insights generated: %d items", len(items))
+        except Exception as exc:
+            logger_sched.error("Midnight insights generation failed: %s", exc)
+
+
+@router.post("/refresh", response_model=APIResponse)
+async def refresh_insights(
+    db: AsyncSession = Depends(get_db),
+    user: TokenPayload = Depends(get_current_user),
+) -> APIResponse:
+    """Manually trigger insight generation (admin only)."""
+    rule_items = await _generate_and_save_insights(db)
+    return APIResponse.success(
+        data={"count": len(rule_items), "message": f"Generated {len(rule_items)} insights"},
+    )
+
+
+def start_insights_scheduler():
+    """Start the midnight scheduler as a background task."""
+    asyncio.create_task(_midnight_scheduler())
 
 
 def get_optional_user(request: Request) -> TokenPayload | None:
@@ -78,12 +172,15 @@ async def list_insights(
     if source == "rules":
         metrics = await MetricsService.get_core_metrics(
             db=db, period=period, dimension=dimension,
+            sections={"summary", "trend_series"},
         )
         customer_metrics = await MetricsService.get_core_metrics(
             db=db, period=period, dimension="customer",
+            sections={"breakdowns"},
         )
         product_metrics = await MetricsService.get_core_metrics(
-            db=db, period=period, dimension="product_line",
+            db=db, period=period, dimension="product_bgbu",
+            sections={"breakdowns"},
         )
         rule_items = await InsightRuleService.generate_insights(
             metrics,

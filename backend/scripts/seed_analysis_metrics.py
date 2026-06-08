@@ -3,7 +3,7 @@
 Adds metric_name records for:
 - target_revenue: revenue target per department per period (for achievement_rate)
 - order_count: total order count per period (company-level)
-- loss_count / total_count: loss-making order counts per product_line per period
+- loss_count / total_count: loss-making order counts per product_bgbu per period
 
 Idempotent: deletes prior rows with raw_row->>'mock_source' = 'analysis_metrics' before re-seeding.
 Does NOT TRUNCATE financial_data.
@@ -145,7 +145,7 @@ def main():
                 "raw_row_val": json.dumps({"mock_source": MOCK_TAG, "note": f"order count for {period}"}),
             })
 
-        # 4. loss_count and total_count per product_line per period
+        # 4. loss_count and total_count per product_bgbu per period
         for period in PERIODS:
             for product, loss_rate in PRODUCT_LOSS_RATE.items():
                 total_orders = rng.randint(8, 20)
@@ -157,7 +157,7 @@ def main():
                     "metric_unit": "count",
                     "period": period,
                     "entity": product,
-                    "tags_val": json.dumps({"product_line": product}),
+                    "tags_val": json.dumps({"product_bgbu": product}),
                     "raw_row_val": json.dumps({"mock_source": MOCK_TAG, "note": f"{product} loss count for {period}"}),
                 })
 
@@ -167,7 +167,7 @@ def main():
                     "metric_unit": "count",
                     "period": period,
                     "entity": product,
-                    "tags_val": json.dumps({"product_line": product}),
+                    "tags_val": json.dumps({"product_bgbu": product}),
                     "raw_row_val": json.dumps({"mock_source": MOCK_TAG, "note": f"{product} total count for {period}"}),
                 })
 

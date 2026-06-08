@@ -132,7 +132,7 @@ const multiDimLabel = computed(() => trendDimension.value === 'department' ? '�
 const dimensionOptions = [
   { label: '公司整体', value: 'company' },
   { label: '部门', value: 'department' },
-  { label: '产品线', value: 'product_line' },
+  { label: '产品线', value: 'product_bgbu' },
 ];
 const entityOptions = ref<Array<{ label: string; value: string }>>([]);
 
@@ -290,7 +290,7 @@ async function loadRecommendations() {
     const extra: Record<string, string | undefined> = {};
     if (trendDimension.value === 'department' && selectedEntity.value) {
       extra.department = selectedEntity.value;
-    } else if (trendDimension.value === 'product_line' && selectedEntity.value) {
+    } else if (trendDimension.value === 'product_bgbu' && selectedEntity.value) {
       extra.product = selectedEntity.value;
     }
     const { data } = await getAnalysisRecommendations({
@@ -307,7 +307,7 @@ async function loadRecommendations() {
 async function fetchMetrics() {
   loading.value = true;
   try {
-    const filterParam = trendDimension.value === 'department' ? 'department' : trendDimension.value === 'product_line' ? 'product' : null;
+    const filterParam = trendDimension.value === 'department' ? 'department' : trendDimension.value === 'product_bgbu' ? 'product' : null;
     const { data: resp } = await getCoreMetrics({
       period: period.value,
       dimension: trendDimension.value,

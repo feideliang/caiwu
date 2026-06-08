@@ -51,10 +51,9 @@ COL_MAP = {
     "产品分类": "product_classification",
     "产品事业部代码": "product_bu_code",
     "产品事业部名称": "product_bu_name",
-    "产品所属事业部": "product_line",
+    "产品所属事业部": "product_bgbu",
     "产品所属组织": "product_org",
     "产品系列": "series",
-    "产品线": "product_line",
     "产品族(产品线说明)": "product_family",
     "销售产品代码": "sales_product_code",
     "销售产品名称": "sales_product_name",
@@ -113,8 +112,8 @@ TABLE_COLUMNS = [
     "company", "hr_dept_code", "hr_department", "sales_department",
     "sales_person_code", "sales_person",
     "product_category", "product_classification", "product_bu_code",
-    "product_bu_name", "product_line", "product_org", "series",
-    "product_line", "product_family", "sales_product_code", "sales_product_name",
+    "product_bu_name", "product_bgbu", "product_org", "series",
+    "product_family", "sales_product_code", "sales_product_name",
     "material_code", "material_desc", "material_cost_category",
     "cost_class_1", "cost_class_2", "cost_class_3",
     "ncc_customer_code", "customer", "invoice_customer", "invoice_name",
@@ -195,8 +194,8 @@ INSERT_COLUMNS = [c for c in TABLE_COLUMNS if c in {
     "company", "hr_dept_code", "hr_department", "sales_department",
     "sales_person_code", "sales_person",
     "product_category", "product_classification", "product_bu_code",
-    "product_bu_name", "product_line", "product_org", "series",
-    "product_line", "product_family", "sales_product_code", "sales_product_name",
+    "product_bu_name", "product_bgbu", "product_org", "series",
+    "product_family", "sales_product_code", "sales_product_name",
     "material_code", "material_desc", "material_cost_category",
     "cost_class_1", "cost_class_2", "cost_class_3",
     "ncc_customer_code", "final_customer",
@@ -299,6 +298,8 @@ async def main(dry_run=False):
                 if en_name not in INSERT_COLUMNS[2:]:
                     continue
                 val = row.get(cn_name)
+                if en_name == "product_bgbu" and (val is None or (isinstance(val, float) and pd.isna(val))):
+                    val = row.get("产品事业部名称")
                 if en_name in NUMERIC_COLS:
                     vals.append(_to_num(val))
                 elif en_name in INT_COLS:

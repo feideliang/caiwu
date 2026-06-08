@@ -1,4 +1,4 @@
-export type ReportType = 'revenue_daily' | 'gross_profit_daily' | 'department_daily' | 'product_line_daily' | 'custom';
+export type ReportType = 'revenue_daily' | 'gross_profit_daily' | 'department_daily' | 'product_bgbu_daily' | 'custom';
 export type ReportStatus = 'pending' | 'generating' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ReportFormat = 'word' | 'pdf';
 

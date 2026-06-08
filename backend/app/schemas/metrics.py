@@ -150,7 +150,7 @@ class CoreMetricsResponse(BaseModel):
     entity: str | None = None
     summary: CoreMetricsSummary
     breakdowns: list[BreakdownItem] = Field(default_factory=list)
-    product_line_breakdown: list[BreakdownItem] = Field(default_factory=list)
+    product_bgbu_breakdown: list[BreakdownItem] = Field(default_factory=list)
     customer_breakdown: list[BreakdownItem] = Field(default_factory=list)
     contract_type_breakdown: list[BreakdownItem] = Field(default_factory=list)
     trend_series: list[TrendDataPoint] = Field(default_factory=list)

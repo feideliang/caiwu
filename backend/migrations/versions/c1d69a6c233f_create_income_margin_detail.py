@@ -51,7 +51,7 @@ def upgrade() -> None:
         sa.Column("product_bgbu", sa.String(128), nullable=True, comment="产品归属BGBU"),
         sa.Column("product_org", sa.String(256), nullable=True, comment="产品所属组织"),
         sa.Column("series", sa.String(256), nullable=True, comment="产品系列"),
-        sa.Column("product_line", sa.String(256), nullable=True, comment="产品线"),
+        sa.Column("product_bgbu", sa.String(256), nullable=True, comment="产品线"),
         sa.Column("product_family", sa.String(256), nullable=True, comment="产品族"),
         sa.Column("sales_product_code", sa.String(128), nullable=True, comment="销售产品代码"),
         sa.Column("sales_product_name", sa.String(256), nullable=True, comment="销售产品名称"),
@@ -134,13 +134,13 @@ def upgrade() -> None:
     # Composite indexes for common query patterns
     op.create_index("ix_imd_period_entity", "income_margin_detail", ["period", "entity"])
     op.create_index("ix_imd_customer_period", "income_margin_detail", ["customer", "period"])
-    op.create_index("ix_imd_product_line_period", "income_margin_detail", ["product_line", "period"])
+    op.create_index("ix_imd_product_bgbu_period", "income_margin_detail", ["product_bgbu", "period"])
     op.create_index("ix_imd_bgbu_period", "income_margin_detail", ["bgbu", "period"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_imd_bgbu_period", table_name="income_margin_detail")
-    op.drop_index("ix_imd_product_line_period", table_name="income_margin_detail")
+    op.drop_index("ix_imd_product_bgbu_period", table_name="income_margin_detail")
     op.drop_index("ix_imd_customer_period", table_name="income_margin_detail")
     op.drop_index("ix_imd_period_entity", table_name="income_margin_detail")
     op.drop_table("income_margin_detail")

@@ -58,11 +58,11 @@ SEED_RULES = [
     ("drilldown_L2", "第二层：组织与时间维度下钻，定位哪个销售部门或产品事业部在哪个时间周期为主要驱动因素", "四层穿透", None, None, None, None, False),
     ("drilldown_L3", "第三层：客户与产品维度交叉分析，分析客户签约类型或物料成本大类×产品系列导致的利润变化", "四层穿透", None, None, None, None, False),
     ("drilldown_L4", "第四层：交易与项目维度根因定位，穿透至具体订单分类、项目名称、关键客户", "四层穿透", None, None, None, None, False),
-    ("drilldown_product", "产品钻取路径：产品线(product_line) → 销售产品名称(sales_product_name)，查看具体销售产品明细", "钻取路径", None, None, None, None, False),
+    ("drilldown_product", "产品钻取路径：产品线(product_bgbu) → 销售产品名称(sales_product_name)，查看具体销售产品明细", "钻取路径", None, None, None, None, False),
 
     # ── 数据维度说明 ──
     ("dimension_org", "组织维度字段：department(市场线:CBG/EBG/SBG/TBU), sales_department(销售部门), hr_department(HR部门), hr_dept_code(HR部门编码)", "数据维度", None, None, None, None, False),
-    ("dimension_product", "产品维度字段：product_line(产品线), series(产品系列), product_category(产品大类), product_classification(产品分类), product_family(产品族), product_bu_name(产品事业部名称), product_bu_code(产品事业部代码), product_org(产品所属组织), product_line(产品归属BGBU)", "数据维度", None, None, None, None, False),
+    ("dimension_product", "产品维度字段：product_bgbu(产品线), series(产品系列), product_category(产品大类), product_classification(产品分类), product_family(产品族), product_bu_name(产品事业部名称), product_bu_code(产品事业部代码), product_org(产品所属组织), product_bgbu(产品归属BGBU)", "数据维度", None, None, None, None, False),
     ("dimension_sales_product", "销售产品维度字段：sales_product_code(销售产品代码), sales_product_name(销售产品名称), material_code(物料编码), material_desc(物料描述), material_cost_category(物料成本大类)", "数据维度", None, None, None, None, False),
     ("dimension_cost", "成本分类维度字段：cost_class_1(一级成本分类), cost_class_2(二级成本分类), cost_class_3(三级成本分类), cost_category(成本大类)", "数据维度", None, None, None, None, False),
     ("dimension_customer", "客户维度字段：customer(客户), ncc_customer_code(NCC客户编码), order_customer(订单客户), invoice_customer(开票客户简称), invoice_name(开票名称), final_customer(最终客户名称), superior_name(上级名称), contract_type(客户签约类型:直签/渠道)", "数据维度", None, None, None, None, False),
@@ -76,7 +76,7 @@ SEED_RULES = [
     ("page_change", "变动分析三大模块：收入变动(当期/基期/变化比例+主要变动影响)、毛利额变动、毛利率变动(当期/基期/变化值pp+结构影响+毛利影响)。主要变动因素为累计贡献80%的维度", "页面分析逻辑", None, None, None, None, False),
     ("page_change_concentration", "变动分析-集中度排名：收入/毛利额/毛利率三个指标并行展示各维度排名", "页面分析逻辑", None, None, None, None, False),
     ("page_dept", "部门分析维度：department(市场线)。KPI：营业收入/毛利额/毛利率/亏损订单占比。明细列：收入贡献度/毛利贡献度/负毛利订单数量/负毛利金额", "页面分析逻辑", None, None, None, None, False),
-    ("page_product", "产品分析维度：product_line(产品线)。KPI：收入/毛利额/毛利率/亏损产品占比。支持钻取到sales_product_name层级查看销售产品明细。明细列：收入贡献度/毛利贡献度/负毛利产品数量/负毛利金额", "页面分析逻辑", None, None, None, None, False),
+    ("page_product", "产品分析维度：product_bgbu(产品线)。KPI：收入/毛利额/毛利率/亏损产品占比。支持钻取到sales_product_name层级查看销售产品明细。明细列：收入贡献度/毛利贡献度/负毛利产品数量/负毛利金额", "页面分析逻辑", None, None, None, None, False),
 
     # ── 报告输出 ──
     ("report_structure", "标准分析报告包含四部分：总体业绩概览、多维下钻分析、根本原因总结、具体业务建议", "标准化报告输出", None, None, None, None, False),

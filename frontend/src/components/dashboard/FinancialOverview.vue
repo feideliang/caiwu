@@ -19,7 +19,7 @@
     <!-- Core Metrics Panel -->
     <CoreMetricsPanel
       :period="period"
-      :dimension="department ? 'department' : product ? 'product_line' : 'company'"
+      :dimension="department ? 'department' : product ? 'product_bgbu' : 'company'"
       :entity="department || product"
       :period-dimension="periodDimension"
       :product="product"
@@ -242,13 +242,19 @@ async function fetchData() {
   }
 }
 
-watch(() => [props.period, props.periodDimension, props.periodStart, props.periodEnd, props.department, props.product], fetchData);
+let _mounted = false;
+
+watch(() => [props.period, props.periodDimension, props.periodStart, props.periodEnd, props.department, props.product], () => {
+  if (!_mounted) return;
+  fetchData();
+});
 
 onMounted(async () => {
   await Promise.all([
     fetchData(),
     insightsStore.fetchInsights(),
   ]);
+  _mounted = true;
 });
 
 function onApplyRecommendation(chartType: string, _config: Record<string, unknown>) {

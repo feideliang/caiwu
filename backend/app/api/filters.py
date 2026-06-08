@@ -45,7 +45,7 @@ def _normalize_view_filters(filters: dict | None) -> tuple[list[dict], str]:
 
 @router.get("/filter-options", response_model=APIResponse)
 async def get_filter_options(
-    dimension: str | None = Query(None, description="Dimension: period / entity / metric_name / department / product / product_line / customer"),
+    dimension: str | None = Query(None, description="Dimension: period / entity / metric_name / department / product / product_bgbu / customer"),
     prefix: str | None = Query(None, description="Optional prefix filter"),
     department: str | None = Query(None, description="Filter by department (bgbu)"),
     db: AsyncSession = Depends(get_db),
@@ -53,7 +53,7 @@ async def get_filter_options(
 ) -> APIResponse:
     """Return dynamic filter options for a given dimension.
 
-    Supported dimensions: period, entity, metric_name, department, product, product_line, customer.
+    Supported dimensions: period, entity, metric_name, department, product, product_bgbu, customer.
     Entity options read from AggDimensionSummary; metric_name is a static list.
     """
     col_map = {
@@ -102,13 +102,14 @@ async def get_filter_options(
                 options = [m for m in all_metrics if not prefix or m.startswith(prefix)]
                 return APIResponse.success(data={"dimension": dimension, "options": options, "total": len(options)})
 
-        # Tag-based dimensions: department, product, product_line, customer
-        if dimension in ("department", "product", "product_line", "customer"):
+        # Tag-based dimensions: department, product, product_bgbu, product_bgbu, customer
+        if dimension in ("department", "product", "product_bgbu", "product_bgbu", "customer"):
             # Map to agg table dim_type
             dim_type_map = {
                 "department": None,  # from period_summary bgbu
-                "product_line": "product_line",
-                "product": "product_line",
+                "product_bgbu": "product_bgbu",
+                "product_bgbu": "product_bgbu",
+                "product": "product_bgbu",
                 "customer": "customer",
             }
             bgbu = department if department else (user.department if (user.role != "admin" and user.department) else "ALL")
@@ -138,20 +139,22 @@ async def get_filter_options(
                         .order_by(IncomeMarginDetail.superior_name)
                     )
                 else:
-                    # Query IncomeMarginDetail directly for product_line (not AggDimensionSummary)
-                    # AggDimensionSummary.dim_value for product_line may not match actual field values
-                    if dimension == "product_line":
+                    # Query from agg_dimension_summary for product_bgbu (fast, pre-aggregated)
+                    if dimension == "product_bgbu":
                         stmt = (
-                            select(IncomeMarginDetail.product_line)
-                            .where(IncomeMarginDetail.product_line.isnot(None))
+                            select(AggDimensionSummary.dim_value)
+                            .where(AggDimensionSummary.bgbu == bgbu)
+                            .where(AggDimensionSummary.dim_type == agg_type)
+                            .where(AggDimensionSummary.dim_value.isnot(None))
                             .distinct()
-                            .order_by(IncomeMarginDetail.product_line)
+                            .order_by(AggDimensionSummary.dim_value)
                         )
                     else:
                         stmt = (
                             select(AggDimensionSummary.dim_value)
                             .where(AggDimensionSummary.bgbu == bgbu)
                             .where(AggDimensionSummary.dim_type == agg_type)
+                            .where(AggDimensionSummary.dim_value.isnot(None))
                             .distinct()
                             .order_by(AggDimensionSummary.dim_value)
                         )

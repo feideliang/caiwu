@@ -7,7 +7,7 @@ syncs to PostgreSQL via DataSyncService.sync_incremental.
 MySQL table structure (based on 收入毛利明细 Excel):
   - 确认收入日期  → period (YYYY-MM)
   - 销售BGBU     → entity
-  - 产品线        → tags.product_line
+  - 产品线        → tags.product_bgbu
   - 产品系列      → tags.series
   - 客户          → tags.customer
   - 收入金额(人民币) → metric_value for metric_name='revenue'
@@ -63,7 +63,7 @@ MYSQL_COLUMN_MAP = {
     "营业成本": "cost_amount",
     "cost": "cost_amount",
     # tag fields → stored in tags JSON
-    "产品线": "tag:product_line",
+    "产品线": "tag:product_bgbu",
     "产品系列": "tag:series",
     "产品大类": "tag:product_category",
     "产品分类": "tag:product_classification",
@@ -71,7 +71,7 @@ MYSQL_COLUMN_MAP = {
     "产品事业部名称": "tag:product_bu_name",
     "产品事业部代码": "tag:product_bu_code",
     "产品所属组织": "tag:product_org",
-    "产品归属BGBU": "tag:product_line",
+    "产品归属BGBU": "tag:product_bgbu",
     "销售产品代码": "tag:sales_product_code",
     "销售产品名称": "tag:sales_product_name",
     "物料编码": "tag:material_code",

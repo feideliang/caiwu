@@ -211,10 +211,9 @@ class IncomeMarginDetail(Base):
     product_classification: Mapped[str | None] = mapped_column(String(128))
     product_bu_code: Mapped[str | None] = mapped_column(String(64))
     product_bu_name: Mapped[str | None] = mapped_column(String(256))
-    product_bgbu_value: Mapped[str | None] = mapped_column(String(128), name="product_bgbu")
+    product_bgbu: Mapped[str | None] = mapped_column(String(256), name="product_bgbu")
     product_org: Mapped[str | None] = mapped_column(String(256))
     series: Mapped[str | None] = mapped_column(String(256))
-    product_line: Mapped[str | None] = mapped_column(String(256))
     product_family: Mapped[str | None] = mapped_column(String(256))
     sales_product_code: Mapped[str | None] = mapped_column(String(128))
     sales_product_name: Mapped[str | None] = mapped_column(String(256))
@@ -333,7 +332,7 @@ class AggDimensionSummary(_AggBase):
 
     period: Mapped[str] = mapped_column(String(10), primary_key=True)
     bgbu: Mapped[str] = mapped_column(String(64), primary_key=True, server_default="ALL")
-    dim_type: Mapped[str] = mapped_column(String(32), primary_key=True)  # product_line, sales_product, customer, contract_type
+    dim_type: Mapped[str] = mapped_column(String(32), primary_key=True)  # product_bgbu, sales_product, customer, contract_type
     dim_value: Mapped[str] = mapped_column(String(512), primary_key=True)
     revenue: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")
     cost: Mapped[float] = mapped_column(Numeric(20, 2), server_default="0")

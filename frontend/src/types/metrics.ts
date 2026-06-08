@@ -134,7 +134,7 @@ export interface CoreMetricsResponse {
   dimension: string;
   summary: CoreMetricsSummary;
   breakdowns: BreakdownItem[];
-  product_line_breakdown: BreakdownItem[];
+  product_bgbu_breakdown: BreakdownItem[];
   customer_breakdown: BreakdownItem[];
   contract_type_breakdown: BreakdownItem[];
   trend_series: TrendDataPoint[];

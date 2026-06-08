@@ -9,7 +9,7 @@ export interface InlineInsight {
   route?: RouteLocationRaw;
 }
 
-const DIM_LABELS: Record<string, string> = { department: '部门', product_line: '产品线', company: '公司', customer: '客户' };
+const DIM_LABELS: Record<string, string> = { department: '部门', product_bgbu: '产品线', company: '公司', customer: '客户' };
 
 function wan(v: number | undefined | null): string {
   if (v == null) return '0';
@@ -17,7 +17,7 @@ function wan(v: number | undefined | null): string {
 }
 
 export function useInlineInsights(opts: {
-  dimension: 'department' | 'product_line' | 'company' | 'customer';
+  dimension: 'department' | 'product_bgbu' | 'company' | 'customer';
   breakdowns: ComputedRef<BreakdownItem[]>;
   summary: ComputedRef<CoreMetricsSummary | undefined>;
   trendSeries?: ComputedRef<TrendDataPoint[]>;

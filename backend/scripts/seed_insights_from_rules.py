@@ -42,9 +42,9 @@ async def main():
             db=db, dimension="customer"
         )
 
-        print("Fetching core metrics for product_line dimension...")
+        print("Fetching core metrics for product_bgbu dimension...")
         product_metrics = await MetricsService.get_core_metrics(
-            db=db, dimension="product_line"
+            db=db, dimension="product_bgbu"
         )
 
         print("Generating rule-based insights...")

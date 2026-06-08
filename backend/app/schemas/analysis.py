@@ -9,6 +9,7 @@ class AnalysisRecommendationRequest(BaseModel):
     period: str | None = None
     period_compare_type: str | None = None  # yoy/mom/cumulative
     period_dimension: str | None = None  # monthly/quarterly/cumulative
+    dimension: str | None = None  # company/department/product_bgbu/customer/etc.
     department: str | None = None
     product: str | None = None
     customer: str | None = None

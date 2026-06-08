@@ -85,9 +85,22 @@ class PredictionService:
                 await db.flush()
                 return prediction
 
+            if col_name == "ALL":
+                # Not a real column, handle gracefully
+                prediction.accuracy_score = None
+                prediction.model_name = "insufficient_data"
+                prediction.computed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                await db.flush()
+                return prediction
+
+            # Aggregate across all departments (no per-company "ALL" rows in AggPeriodSummary)
             stmt = (
-                select(getattr(AggPeriodSummary, col_name), AggPeriodSummary.period)
-                .where(AggPeriodSummary.bgbu == "ALL")
+                select(
+                    func.sum(getattr(AggPeriodSummary, col_name)),
+                    AggPeriodSummary.period,
+                )
+                .where(AggPeriodSummary.bgbu != "ALL")
+                .group_by(AggPeriodSummary.period)
                 .order_by(AggPeriodSummary.period)
             )
             rows = (await db.execute(stmt)).all()
@@ -199,9 +212,11 @@ class PredictionService:
             }
             agg_col = metric_col_map.get(prediction.metric_name)
             if agg_col is not None:
+                # Aggregate across all departments (no per-company "ALL" rows)
                 stmt = (
-                    select(AggPeriodSummary.period, agg_col)
-                    .where(AggPeriodSummary.bgbu == "ALL")
+                    select(AggPeriodSummary.period, func.sum(agg_col))
+                    .where(AggPeriodSummary.bgbu != "ALL")
+                    .group_by(AggPeriodSummary.period)
                     .order_by(AggPeriodSummary.period)
                 )
                 rows = (await db.execute(stmt)).all()

@@ -351,12 +351,12 @@ _KNOWLEDGE_BASE_RULES = (
     "第二层：组织与时间维度下钻，定位异常部门或产品事业部\n"
     "第三层：客户与产品维度交叉分析，分析客户签约类型或物料成本大类×产品系列\n"
     "第四层：交易与项目维度根因定位，穿透至订单分类、项目名称、关键客户\n"
-    "产品钻取路径：产品线(product_line) → 销售产品名称(sales_product_name)\n"
+    "产品钻取路径：产品线(product_bgbu) → 销售产品名称(sales_product_name)\n"
 
     # ── 可用的分析维度字段 ──
     "--- 数据维度说明（financial_data tags JSON字段）---\n"
     "组织维度：department(市场线:CBG/EBG/SBG/TBU), sales_department(销售部门), hr_department(HR部门), hr_dept_code\n"
-    "产品维度：product_line(产品线), series(产品系列), product_category(产品大类), product_classification(产品分类), product_family(产品族), product_bu_name(产品事业部名称), product_bu_code(产品事业部代码), product_org(产品所属组织), product_line(产品归属BGBU)\n"
+    "产品维度：product_bgbu(产品线), series(产品系列), product_category(产品大类), product_classification(产品分类), product_family(产品族), product_bu_name(产品事业部名称), product_bu_code(产品事业部代码), product_org(产品所属组织), product_bgbu(产品归属BGBU)\n"
     "销售产品维度：sales_product_code(销售产品代码), sales_product_name(销售产品名称), material_code(物料编码), material_desc(物料描述), material_cost_category(物料成本大类)\n"
     "成本分类维度：cost_class_1(一级成本分类), cost_class_2(二级成本分类), cost_class_3(三级成本分类), cost_category(成本大类)\n"
     "客户维度：customer(客户), ncc_customer_code(NCC客户编码), order_customer(订单客户), invoice_customer(开票客户简称), invoice_name(开票名称), final_customer(最终客户名称), superior_name(上级名称), contract_type(客户签约类型:直签/渠道)\n"
@@ -387,7 +387,7 @@ _KNOWLEDGE_BASE_RULES = (
     "明细列：收入贡献度、毛利贡献度、负毛利订单数量、负毛利金额\n"
 
     "--- 产品分析 ---\n"
-    "维度：product_line, 按产品线分析收入和毛利\n"
+    "维度：product_bgbu, 按产品线分析收入和毛利\n"
     "KPI：收入、毛利额、毛利率、亏损产品占比\n"
     "图表：产品收入排行(bar) + 产品线收入毛利对比(grouped-bar) + 毛利率分布(pie) + 收入毛利气泡图(scatter)\n"
     "钻取：点击产品线可下钻到sales_product_name层级，查看具体销售产品明细\n"
@@ -981,7 +981,7 @@ async def ai_chat(
         prod_r = await MetricsService.get_core_metrics(
             db=db,
             period=body.context.period if body.context else None,
-            dimension="product_line",
+            dimension="product_bgbu",
             compare="mom",
             period_dimension=body.context.period_dimension if body.context else "monthly",
             bgbu_filter="ALL",
@@ -1327,7 +1327,7 @@ async def ai_chat_stream(
                 prod_r = await MetricsService.get_core_metrics(
                     db=session,
                     period=body.context.period if body.context else None,
-                    dimension="product_line",
+                    dimension="product_bgbu",
                     compare="mom",
                     period_dimension=body.context.period_dimension if body.context else "monthly",
                     bgbu_filter="ALL",
@@ -1422,9 +1422,11 @@ async def get_analysis_recommendations(
         customer=cust_param,
     )
 
-    # Fetch department breakdown if needed
+    request_dimension = (body.dimension or "").strip()
+
+    # Fetch department breakdown if needed. For core_metrics, only fetch the active dimension.
     dept_items = []
-    if body.page_type in ("department", "dashboard", "core_metrics"):
+    if body.page_type in ("department", "dashboard") or (body.page_type == "core_metrics" and request_dimension == "department"):
         result = await MetricsService.get_core_metrics(
             db=db,
             period=body.period,
@@ -1436,13 +1438,13 @@ async def get_analysis_recommendations(
         )
         dept_items = [b.model_dump() for b in result.breakdowns]
 
-    # Fetch product breakdown
+    # Fetch product breakdown. For core_metrics, only fetch the active dimension.
     prod_items = []
-    if body.page_type in ("product", "dashboard", "core_metrics"):
+    if body.page_type in ("product", "dashboard") or (body.page_type == "core_metrics" and request_dimension in ("product_bgbu", "sales_product")):
         result = await MetricsService.get_core_metrics(
             db=db,
             period=body.period,
-            dimension="product_line",
+            dimension="product_bgbu",
             compare="mom",
             period_dimension=resolved_pd,
             product=prod_param,
@@ -1451,9 +1453,9 @@ async def get_analysis_recommendations(
         )
         prod_items = [b.model_dump() for b in result.breakdowns]
 
-    # Fetch customer breakdown
+    # Fetch customer breakdown. For core_metrics, only fetch when customer is active.
     customer_items = []
-    if body.page_type in ("customer", "dashboard"):
+    if body.page_type in ("customer", "dashboard") or (body.page_type == "core_metrics" and request_dimension == "customer"):
         result = await MetricsService.get_core_metrics(
             db=db,
             period=body.period,

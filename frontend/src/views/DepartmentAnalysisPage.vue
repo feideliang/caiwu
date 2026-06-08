@@ -40,7 +40,7 @@
             <a-tag v-else color="blue">{{ authStore.department }}</a-tag>
             <!-- Secondary dimension selector -->
             <a-select v-if="selectedDept || authStore.isDeptRestricted" v-model:value="secondaryDimension" style="width: 130px" placeholder="对比维度">
-              <a-select-option value="product_line">产品线</a-select-option>
+              <a-select-option value="product_bgbu">产品线</a-select-option>
               <a-select-option value="customer">客户</a-select-option>
             </a-select>
             <!-- Customer filter (only when secondary dimension is customer) -->
@@ -143,7 +143,7 @@
     <!-- Drill dimension picker modal -->
     <a-modal v-model:open="drillModalVisible" title="选择下钻维度" :footer="null" width="320px">
       <a-space direction="vertical" style="width: 100%">
-        <a-button type="primary" block size="large" @click="confirmDrillDim('product_line')">产品线</a-button>
+        <a-button type="primary" block size="large" @click="confirmDrillDim('product_bgbu')">产品线</a-button>
         <a-button block size="large" @click="confirmDrillDim('customer')">客户</a-button>
       </a-space>
     </a-modal>
@@ -197,7 +197,7 @@ const periodDimension = ref<string>('cumulative');
 const selectedPeriod = ref<string | undefined>();
 const compareBase = ref<string>('yoy');
 const selectedDept = ref<string | undefined>();
-const secondaryDimension = ref<string>('product_line');
+const secondaryDimension = ref<string | undefined>(undefined);
 const selectedCustomer = ref<string | undefined>();
 const customRange = ref<[any, any] | null>(null);
 const periodStart = ref<string | undefined>();
@@ -217,12 +217,12 @@ const metricsData = ref<CoreMetricsResponse | null>(null);
 // Drill-down state
 const drillLevel = ref(0);  // 0=部门总览, 1=产品线/客户, 2=销售产品
 const drillDept = ref<string>();
-const drillDim = ref<'product_line' | 'customer'>();
+const drillDim = ref<'product_bgbu' | 'customer'>();
 const drillEntity = ref<string>();
 const drillModalVisible = ref(false);
 const drillPendingName = ref<string>();
 
-const drillDimLabel = computed(() => drillDim.value === 'product_line' ? '产品线' : '客户');
+const drillDimLabel = computed(() => drillDim.value === 'product_bgbu' ? '产品线' : '客户');
 
 // Derived period
 const period = computed(() => {
@@ -251,12 +251,16 @@ watch(periodDimension, () => {
 const summary = computed(() => metricsData.value?.summary);
 const breakdowns = computed<BreakdownItem[]>(() => metricsData.value?.breakdowns || []);
 
-// Secondary dimension toggle: switch between product_line and customer breakdown
+// Secondary dimension toggle: switch between product_bgbu and customer breakdown
 const displayBreakdowns = computed<BreakdownItem[]>(() => {
+  // When no secondary dimension selected, show department breakdowns (default)
+  if (!secondaryDimension.value) {
+    return breakdowns.value;
+  }
   if (secondaryDimension.value === 'customer') {
     return metricsData.value?.customer_breakdown || [];
   }
-  const pl = metricsData.value?.product_line_breakdown;
+  const pl = metricsData.value?.product_bgbu_breakdown;
   if (pl && pl.length > 0) return pl;
   return breakdowns.value;
 });
@@ -387,7 +391,7 @@ function onChartClick(name: string) {
   // Level 2 has no further drill
 }
 
-function confirmDrillDim(dim: 'product_line' | 'customer') {
+function confirmDrillDim(dim: 'product_bgbu' | 'customer') {
   drillModalVisible.value = false;
   drillLevel.value = 1;
   drillDept.value = drillPendingName.value;
@@ -435,7 +439,7 @@ async function fetchMetrics() {
     } else {
       params.dimension = 'sales_product';
       // Removed: drillDept is not a department, do not pass as bgbu_filter
-      if (drillDim.value === 'product_line') {
+      if (drillDim.value === 'product_bgbu') {
         params.product = drillEntity.value;
       } else {
         params.customer = drillEntity.value;

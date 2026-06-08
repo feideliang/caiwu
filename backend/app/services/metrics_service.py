@@ -209,6 +209,7 @@ class MetricsService:
         customer: str | None = None,
         sections: set[str] | None = None,
         bgbu_filter: str = "ALL",
+        skip_order_metrics: bool = False,
     ) -> CoreMetricsResponse:
         # ── department param overrides bgbu_filter ──
         if department:
@@ -217,7 +218,7 @@ class MetricsService:
         # ── Map entity parameter to dimension-specific params ──
         # Frontend uses 'entity' generically; backend needs dimension-specific param names
         if entity:
-            if dimension == 'product_line' and not product:
+            if dimension == 'product_bgbu' and not product:
                 product = entity
             elif dimension == 'customer' and not customer:
                 customer = entity
@@ -236,6 +237,15 @@ class MetricsService:
         #         return CoreMetricsResponse(**_cached)
         # except Exception:
         #     pass
+
+        # Fast path: empty sections → return minimal response immediately
+        if sections is not None and len(sections) == 0:
+            return CoreMetricsResponse(
+                period=period, dimension=dimension, entity=entity,
+                summary=CoreMetricsSummary(), breakdowns=[],
+                product_bgbu_breakdown=[], customer_breakdown=[], contract_type_breakdown=[],
+                data_quality=DataQuality(calculable=False),
+            )
 
         all_periods = await MetricsService._list_periods(db, bgbu_filter=bgbu_filter, limit=36)
         period_dimension = _normalize_period_dimension(period_dimension)
@@ -261,7 +271,7 @@ class MetricsService:
                 entity=entity,
                 summary=CoreMetricsSummary(),
                 breakdowns=[],
-                product_line_breakdown=[],
+                product_bgbu_breakdown=[],
                 customer_breakdown=[],
                 contract_type_breakdown=[],
                 data_quality=DataQuality(
@@ -375,6 +385,14 @@ class MetricsService:
 
         # ── Section flags: skip unneeded queries when caller only wants a subset ──
         _all = sections is None
+        # Fast path: empty sections → return minimal response
+        if sections is not None and len(sections) == 0:
+            return CoreMetricsResponse(
+                period=period, dimension=dimension, entity=entity,
+                summary=CoreMetricsSummary(), breakdowns=[],
+                product_bgbu_breakdown=[], customer_breakdown=[], contract_type_breakdown=[],
+                data_quality=DataQuality(calculable=False),
+            )
         need_summary = _all or "summary" in sections
         need_breakdowns = _all or "breakdowns" in sections
         need_trend = _all or "trend_series" in sections
@@ -387,7 +405,7 @@ class MetricsService:
         _is_company_dim = dimension == "company"
         _is_dept_dim = dimension == "department"
         _is_customer_dim = dimension == "customer"
-        _is_product_dim = dimension == "product_line"
+        _is_product_dim = dimension == "product_bgbu"
 
         # ── 1. Period summary (replaces B1 + B6b + target_q + ds_q) ──
         period_bucket: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -396,8 +414,8 @@ class MetricsService:
         direct_sign_rev = 0.0
         direct_sign_gp = 0.0
 
-        # Periods needed for trend + consecutive growth (more than just current period)
-        _trend_period_pool = set(query_periods)
+        # Periods needed for period_bucket query: include all query periods + trend periods
+        _trend_period_pool = set(query_periods) if query_periods else set()
         if need_trend and trend_periods:
             _trend_period_pool |= set(trend_periods)
 
@@ -412,12 +430,12 @@ class MetricsService:
         if need_summary or need_trend:
             if product:
                 # Product filter: query IncomeMarginDetail
-                # Match by product_line or sales_product_name
+                # Match by product_bgbu or sales_product_name
                 ps_imd_filters = [
                     IncomeMarginDetail.period.in_(list(_trend_period_pool)),
                     imd_bgbu_cond,
                     or_(
-                        IncomeMarginDetail.product_line == product,
+                        IncomeMarginDetail.product_bgbu == product,
                         IncomeMarginDetail.sales_product_name == product,
                     ),
                 ]
@@ -482,7 +500,7 @@ class MetricsService:
         # ── 2. Dimension summary (replaces B2/B3/B4/B5/B7) ──
         # Map dimension parameter → dim_type in agg table
         _dim_type_map = {
-            "product_line": "product_line",
+            "product_bgbu": "product_bgbu",
             "sales_product": "sales_product",
             "customer": "customer",
             "contract_type": "contract_type",
@@ -518,7 +536,7 @@ class MetricsService:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["cost"] += float(row[3] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
                 elif product and dimension == 'sales_product':
-                    # Product drill-down: entity could be product_line (product line)
+                    # Product drill-down: entity could be product_bgbu (product line)
                     # or sales_product_name (specific product model like RG-CT5502C-G4)
                     # Try both in a single query with OR
                     imd_sp_prod_q = (
@@ -533,7 +551,7 @@ class MetricsService:
                             IncomeMarginDetail.period.in_(list(detail_periods)),
                             imd_bgbu_cond,
                             or_(
-                                IncomeMarginDetail.product_line == product,
+                                IncomeMarginDetail.product_bgbu == product,
                                 IncomeMarginDetail.sales_product_name == product,
                             ),
                         )
@@ -544,12 +562,12 @@ class MetricsService:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["revenue"] += float(row[2] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["cost"] += float(row[3] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
-                elif customer and dimension == 'product_line':
-                    # Customer filter on product_line dimension: query IncomeMarginDetail by superior_name, group by product_line
+                elif customer and dimension == 'product_bgbu':
+                    # Customer filter on product_bgbu dimension: query IncomeMarginDetail by superior_name, group by product_bgbu
                     imd_pl_cust_q = (
                         select(
                             IncomeMarginDetail.period,
-                            IncomeMarginDetail.product_line,
+                            IncomeMarginDetail.product_bgbu,
                             func.sum(IncomeMarginDetail.revenue_amount).label("revenue"),
                             func.sum(IncomeMarginDetail.cost_amount).label("cost"),
                             func.sum(IncomeMarginDetail.gross_profit_amount).label("gross_profit"),
@@ -559,20 +577,20 @@ class MetricsService:
                             imd_bgbu_cond,
                             IncomeMarginDetail.superior_name == customer,
                         )
-                        .group_by(IncomeMarginDetail.period, IncomeMarginDetail.product_line)
+                        .group_by(IncomeMarginDetail.period, IncomeMarginDetail.product_bgbu)
                     )
                     imd_pl_cust_rows = (await db.execute(imd_pl_cust_q)).all()
                     for row in imd_pl_cust_rows:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["revenue"] += float(row[2] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["cost"] += float(row[3] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
-                elif product and dimension == 'product_line':
-                    # Product filter on product_line dimension: query IncomeMarginDetail directly
-                    # AggDimensionSummary.dim_value may not match IncomeMarginDetail.product_line
+                elif product and dimension == 'product_bgbu':
+                    # Product filter on product_bgbu dimension: query IncomeMarginDetail directly
+                    # AggDimensionSummary.dim_value may not match IncomeMarginDetail.product_bgbu
                     imd_pl_q = (
                         select(
                             IncomeMarginDetail.period,
-                            IncomeMarginDetail.product_line,
+                            IncomeMarginDetail.product_bgbu,
                             func.sum(IncomeMarginDetail.revenue_amount).label("revenue"),
                             func.sum(IncomeMarginDetail.cost_amount).label("cost"),
                             func.sum(IncomeMarginDetail.gross_profit_amount).label("gross_profit"),
@@ -581,10 +599,13 @@ class MetricsService:
                         .where(
                             IncomeMarginDetail.period.in_(list(detail_periods)),
                             imd_bgbu_cond,
-                            IncomeMarginDetail.product_line == product,
-                            IncomeMarginDetail.product_line.isnot(None),
+                            or_(
+                                IncomeMarginDetail.product_bgbu == product,
+                                IncomeMarginDetail.sales_product_name == product,
+                            ),
+                            IncomeMarginDetail.product_bgbu.isnot(None),
                         )
-                        .group_by(IncomeMarginDetail.period, IncomeMarginDetail.product_line)
+                        .group_by(IncomeMarginDetail.period, IncomeMarginDetail.product_bgbu)
                     )
                     imd_pl_rows = (await db.execute(imd_pl_q)).all()
                     for row in imd_pl_rows:
@@ -593,21 +614,33 @@ class MetricsService:
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["gross_profit"] += float(row[4] or 0)
                         period_dim_bucket[row[0]][row[1] or "__empty__"]["order_count"] += int(row[5] or 0)
                 else:
-                    dim_q = select(AggDimensionSummary).where(
+                    # Use explicit GROUP BY query (more reliable than full-row fetch)
+                    dim_q = select(
+                        AggDimensionSummary.period,
+                        AggDimensionSummary.dim_value,
+                        func.sum(AggDimensionSummary.revenue).label("revenue"),
+                        func.sum(AggDimensionSummary.cost).label("cost"),
+                        func.sum(AggDimensionSummary.gross_profit).label("gross_profit"),
+                        func.sum(AggDimensionSummary.order_count).label("order_count"),
+                    ).where(
                         AggDimensionSummary.period.in_(list(detail_periods)),
                         AggDimensionSummary.bgbu == bgbu_filter,
                         AggDimensionSummary.dim_type == dim_type_key,
                     )
-                    if product and dimension == 'product_line':
+                    if product and dimension == 'product_bgbu':
                         dim_q = dim_q.where(AggDimensionSummary.dim_value == product)
                     if customer and dimension == 'customer':
                         dim_q = dim_q.where(AggDimensionSummary.dim_value == customer)
-                    dim_rows = (await db.execute(dim_q)).scalars().all()
+                    dim_q = dim_q.group_by(
+                        AggDimensionSummary.period,
+                        AggDimensionSummary.dim_value,
+                    )
+                    dim_rows = (await db.execute(dim_q)).all()
                     for row in dim_rows:
-                        period_dim_bucket[row.period][row.dim_value]["revenue"] += float(row.revenue or 0)
-                        period_dim_bucket[row.period][row.dim_value]["cost"] += float(row.cost or 0)
-                        period_dim_bucket[row.period][row.dim_value]["gross_profit"] += float(row.gross_profit or 0)
-                        period_dim_bucket[row.period][row.dim_value]["order_count"] += int(row.order_count or 0)
+                        period_dim_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
+                        period_dim_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
+                        period_dim_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
+                        period_dim_bucket[row[0]][row[1]]["order_count"] += int(row[5] or 0)
 
         # Department breakdown: from period_summary per-bgbu rows
         period_dept_bucket: dict[str, dict[str, dict[str, float]]] = defaultdict(
@@ -615,17 +648,46 @@ class MetricsService:
         )
         if _is_dept_dim:
             # When dimension=department, populate period_dim_bucket from period_summary per-bgbu
-            if bgbu_filter == "ALL":
+            if product:
+                # Product filter active: query IncomeMarginDetail directly, filter by product_bgbu, group by bgbu (dept)
+                # Query agg_dimension_summary for fast product-filtered dept data
+                dept_imd_q = (
+                    select(
+                        AggDimensionSummary.period,
+                        AggDimensionSummary.bgbu,
+                        func.sum(AggDimensionSummary.revenue).label("revenue"),
+                        func.sum(AggDimensionSummary.cost).label("cost"),
+                        func.sum(AggDimensionSummary.gross_profit).label("gross_profit"),
+                    )
+                    .where(
+                        AggDimensionSummary.period.in_(list(detail_periods)),
+                        AggDimensionSummary.dim_type == "product_bgbu",
+                        AggDimensionSummary.dim_value == product,
+                        AggDimensionSummary.bgbu.isnot(None),
+                    )
+                    .group_by(AggDimensionSummary.period, AggDimensionSummary.bgbu)
+                )
+                dept_imd_rows = (await db.execute(dept_imd_q)).all()
+                for row in dept_imd_rows:
+                    period_dim_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
+                    period_dim_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
+                    period_dim_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
+                    period_dept_bucket[row[0]][row[1]]["revenue"] += float(row[2] or 0)
+                    period_dept_bucket[row[0]][row[1]]["cost"] += float(row[3] or 0)
+                    period_dept_bucket[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
+            elif bgbu_filter == "ALL":
                 dept_dim_q = select(AggPeriodSummary).where(
                     AggPeriodSummary.period.in_(list(detail_periods)),
                     AggPeriodSummary.bgbu != "ALL",
                 )
+                dept_dim_rows = (await db.execute(dept_dim_q)).scalars().all()
             else:
                 dept_dim_q = select(AggPeriodSummary).where(
                     AggPeriodSummary.period.in_(list(detail_periods)),
                     AggPeriodSummary.bgbu == bgbu_filter,
                 )
-            dept_dim_rows = (await db.execute(dept_dim_q)).scalars().all()
+                dept_dim_rows = (await db.execute(dept_dim_q)).scalars().all()
+            dept_dim_rows = [] if product else dept_dim_rows
             for row in dept_dim_rows:
                 period_dim_bucket[row.period][row.bgbu]["revenue"] += float(row.revenue or 0)
                 period_dim_bucket[row.period][row.bgbu]["cost"] += float(row.cost or 0)
@@ -667,7 +729,7 @@ class MetricsService:
         elif (need_customer_bd or need_summary) and not _is_customer_dim:
             if product:
                 # Product filter active: query customer revenue from IncomeMarginDetail
-                # which has both customer (superior_name) and product (product_line) fields.
+                # which has both customer (superior_name) and product (product_bgbu) fields.
                 # AggDimensionSummary for customer doesn't have product linkage.
                 cust_imd_q = (
                     select(
@@ -681,8 +743,8 @@ class MetricsService:
                         IncomeMarginDetail.period.in_(list(detail_periods)),
                         imd_bgbu_cond,
                         or_(
-                            IncomeMarginDetail.product_line == product,
-                            IncomeMarginDetail.product_line == product,
+                            IncomeMarginDetail.product_bgbu == product,
+                            IncomeMarginDetail.product_bgbu == product,
                             IncomeMarginDetail.sales_product_name == product,
                         ),
                         IncomeMarginDetail.superior_name.isnot(None),
@@ -761,7 +823,7 @@ class MetricsService:
             lambda: defaultdict(lambda: defaultdict(float))
         )
         if _is_product_dim:
-            # Bridge from period_dim_bucket when dimension IS product_line
+            # Bridge from period_dim_bucket when dimension IS product_bgbu
             for p, dim_bk in period_dim_bucket.items():
                 for dv, bk in dim_bk.items():
                     for bkt, val in bk.items():
@@ -825,16 +887,48 @@ class MetricsService:
             lambda: defaultdict(lambda: defaultdict(float))
         )
         if need_ct_bd:
-            ct_q = select(AggDimensionSummary).where(
-                AggDimensionSummary.period.in_(list(current_members)),
-                AggDimensionSummary.bgbu == bgbu_filter,
-                AggDimensionSummary.dim_type == "contract_type",
-            )
-            ct_rows = (await db.execute(ct_q)).scalars().all()
-            for row in ct_rows:
-                period_ct_bucket[row.period][row.dim_value]["revenue"] += float(row.revenue or 0)
-                period_ct_bucket[row.period][row.dim_value]["cost"] += float(row.cost or 0)
-                period_ct_bucket[row.period][row.dim_value]["gross_profit"] += float(row.gross_profit or 0)
+            # When customer or product filter is active, query IncomeMarginDetail directly
+            # to get contract_type scoped to the selected customer/product
+            if customer or product:
+                ct_imd_filters = [
+                    IncomeMarginDetail.period.in_(list(current_members)),
+                    imd_bgbu_cond,
+                ]
+                if customer:
+                    ct_imd_filters.append(IncomeMarginDetail.superior_name == customer)
+                if product:
+                    ct_imd_filters.append(
+                        or_(
+                            IncomeMarginDetail.product_bgbu == product,
+                            IncomeMarginDetail.sales_product_name == product,
+                        )
+                    )
+                ct_imd_q = (
+                    select(
+                        IncomeMarginDetail.period,
+                        IncomeMarginDetail.contract_type_merged,
+                        func.sum(IncomeMarginDetail.revenue_amount).label("revenue"),
+                        func.sum(IncomeMarginDetail.cost_amount).label("cost"),
+                        func.sum(IncomeMarginDetail.gross_profit_amount).label("gross_profit"),
+                    )
+                    .where(*ct_imd_filters)
+                    .group_by(IncomeMarginDetail.period, IncomeMarginDetail.contract_type_merged)
+                )
+                for row in (await db.execute(ct_imd_q)).all():
+                    period_ct_bucket[row[0]][row[1] or "__unknown__"]["revenue"] += float(row[2] or 0)
+                    period_ct_bucket[row[0]][row[1] or "__unknown__"]["cost"] += float(row[3] or 0)
+                    period_ct_bucket[row[0]][row[1] or "__unknown__"]["gross_profit"] += float(row[4] or 0)
+            else:
+                ct_q = select(AggDimensionSummary).where(
+                    AggDimensionSummary.period.in_(list(current_members)),
+                    AggDimensionSummary.bgbu == bgbu_filter,
+                    AggDimensionSummary.dim_type == "contract_type",
+                )
+                ct_rows = (await db.execute(ct_q)).scalars().all()
+                for row in ct_rows:
+                    period_ct_bucket[row.period][row.dim_value]["revenue"] += float(row.revenue or 0)
+                    period_ct_bucket[row.period][row.dim_value]["cost"] += float(row.cost or 0)
+                    period_ct_bucket[row.period][row.dim_value]["gross_profit"] += float(row.gross_profit or 0)
 
         # ── 3. Order summary (replaces B6a + dim_q) ──
         # Aggregate in SQL by (period, order_id) to reduce rows from ~114K to ~30K
@@ -842,9 +936,9 @@ class MetricsService:
             lambda: defaultdict(lambda: defaultdict(float))
         )
         ord_rows: list = []  # populated below for downstream per-dimension order counts
-        # OPTIMIZATION: For customer dimension, skip expensive order aggregation (1.5s)
-        # Use order_count from agg_dimension_summary instead
-        _skip_order_agg = _is_customer_dim and not product and not customer
+        # OPTIMIZATION: For customer/company dimension, skip expensive order aggregation
+        # Use order_count from agg_dimension_summary / agg_period_summary instead
+        _skip_order_agg = skip_order_metrics or (_is_customer_dim or _is_company_dim) and not product and not customer
         if (need_breakdowns or need_summary) and not _skip_order_agg:
             ord_agg_q = select(
                 AggOrderSummary.period,
@@ -867,9 +961,27 @@ class MetricsService:
                 period_order[row[0]][row[1]]["cost"] += float(row[3] or 0)
                 period_order[row[0]][row[1]]["gross_profit"] += float(row[4] or 0)
 
-        # Per-dimension order counts for breakdown
+        # Company-level order metrics: only for company/department dimension
+        _company_order_count: int = 0
+        _company_neg_order_count: int = 0
+        _company_neg_margin_amount: float = 0.0
+        if (_skip_order_agg or _is_company_dim) and not skip_order_metrics and (_is_company_dim or _is_dept_dim):
+            co_q = select(
+                func.count(func.distinct(AggOrderSummary.order_id)).label("order_count"),
+                func.count(func.distinct(case((AggOrderSummary.gross_profit < 0, AggOrderSummary.order_id)))).label("neg_order_count"),
+                func.sum(case((AggOrderSummary.gross_profit < 0, AggOrderSummary.gross_profit), else_=0)).label("neg_margin_amount"),
+            ).where(
+                AggOrderSummary.period.in_(list(current_members)),
+                AggOrderSummary.bgbu == bgbu_filter,
+            )
+            co_row = (await db.execute(co_q)).one()
+            _company_order_count = int(co_row[0] or 0)
+            _company_neg_order_count = int(co_row[1] or 0)
+            _company_neg_margin_amount = float(co_row[2] or 0)
+
+        # Per-dimension order counts for breakdown (only dept/product need this)
         period_orders_dim: dict[str, set[str]] = defaultdict(set)
-        if need_breakdowns and not _is_company_dim and not _is_dept_dim:
+        if need_breakdowns and not _is_company_dim and not _is_dept_dim and not _is_customer_dim:
             # Map orders to dimension values via dim_dept/dim_product or re-query
             dim_type_key = _dim_type_map.get(dimension)
             if dim_type_key and ord_rows:
@@ -888,23 +1000,58 @@ class MetricsService:
         _dim_order_count: dict[str, int] = {}
         _dim_neg_orders: dict[str, int] = {}
         _dim_neg_amount: dict[str, float] = {}
-        if need_breakdowns:
-            if _is_dept_dim and bgbu_filter == "ALL":
+        if need_breakdowns and not skip_order_metrics:
+            if _is_dept_dim:
+                # Department dimension: group by bgbu (short names like CBG/EBG/SBG/TBU)
+                # which matches the department dim_values
                 ord_dim_q = select(
-                    AggOrderSummary.dim_dept,
+                    AggOrderSummary.bgbu,
                     func.count(func.distinct(AggOrderSummary.order_id)).label("order_count"),
                     func.count(func.distinct(case((AggOrderSummary.gross_profit < 0, AggOrderSummary.order_id)))).label("neg_order_count"),
                     func.sum(case((AggOrderSummary.gross_profit < 0, AggOrderSummary.gross_profit), else_=0)).label("neg_margin_amount"),
                 ).where(
                     AggOrderSummary.period.in_(list(current_members)),
-                    AggOrderSummary.bgbu == "ALL",
-                    AggOrderSummary.dim_dept.isnot(None),
-                ).group_by(AggOrderSummary.dim_dept)
+                    AggOrderSummary.bgbu != "ALL",
+                ).group_by(AggOrderSummary.bgbu)
                 for dept, cnt, neg_cnt, neg_amt in (await db.execute(ord_dim_q)).all():
                     if dept:
                         _dim_order_count[str(dept)] = int(cnt)
                         _dim_neg_orders[str(dept)] = int(neg_cnt) if neg_cnt else 0
                         _dim_neg_amount[str(dept)] = float(neg_amt or 0)
+
+            # Also compute product_bgbu-level and customer-level order stats for department dimension
+            # since department breakdown shows product/customer sub-dimensions
+            if _is_dept_dim and need_breakdowns:
+                # Product breakdown under department
+                prod_ord_q = select(
+                    IncomeMarginDetail.product_bgbu,
+                    func.count(func.distinct(IncomeMarginDetail.order_id)).label("order_count"),
+                    func.count(func.distinct(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.order_id)))).label("neg_order_count"),
+                    func.sum(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.gross_profit_amount), else_=0)).label("neg_margin_amount"),
+                ).where(
+                    IncomeMarginDetail.period.in_(list(current_members)),
+                    imd_bgbu_cond,
+                    IncomeMarginDetail.product_bgbu.isnot(None),
+                ).group_by(IncomeMarginDetail.product_bgbu)
+                for prod, cnt, neg_cnt, neg_amt in (await db.execute(prod_ord_q)).all():
+                    if prod:
+                        _dim_neg_orders[str(prod)] = int(neg_cnt) if neg_cnt else 0
+                        _dim_neg_amount[str(prod)] = float(neg_amt or 0)
+                # Customer breakdown under department
+                cust_ord_q = select(
+                    IncomeMarginDetail.superior_name,
+                    func.count(func.distinct(IncomeMarginDetail.order_id)).label("order_count"),
+                    func.count(func.distinct(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.order_id)))).label("neg_order_count"),
+                    func.sum(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.gross_profit_amount), else_=0)).label("neg_margin_amount"),
+                ).where(
+                    IncomeMarginDetail.period.in_(list(current_members)),
+                    imd_bgbu_cond,
+                    IncomeMarginDetail.superior_name.isnot(None),
+                ).group_by(IncomeMarginDetail.superior_name)
+                for cust, cnt, neg_cnt, neg_amt in (await db.execute(cust_ord_q)).all():
+                    if cust:
+                        _dim_neg_orders[str(cust)] = int(neg_cnt) if neg_cnt else 0
+                        _dim_neg_amount[str(cust)] = float(neg_amt or 0)
             elif _is_product_dim:
                 ord_dim_q = select(
                     AggOrderSummary.dim_product,
@@ -921,6 +1068,75 @@ class MetricsService:
                         _dim_order_count[str(prod)] = int(cnt)
                         _dim_neg_orders[str(prod)] = int(neg_cnt) if neg_cnt else 0
                         _dim_neg_amount[str(prod)] = float(neg_amt or 0)
+            elif _is_customer_dim:
+                # Customer dimension: query IncomeMarginDetail directly since agg_order_summary lacks customer
+                cust_ord_q = select(
+                    IncomeMarginDetail.superior_name,
+                    func.count(func.distinct(IncomeMarginDetail.order_id)).label("order_count"),
+                    func.count(func.distinct(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.order_id)))).label("neg_order_count"),
+                    func.sum(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.gross_profit_amount), else_=0)).label("neg_margin_amount"),
+                ).where(
+                    IncomeMarginDetail.period.in_(list(current_members)),
+                    imd_bgbu_cond,
+                    IncomeMarginDetail.superior_name.isnot(None),
+                ).group_by(IncomeMarginDetail.superior_name)
+                if product:
+                    cust_ord_q = cust_ord_q.where(
+                        or_(
+                            IncomeMarginDetail.product_bgbu == product,
+                            IncomeMarginDetail.sales_product_name == product,
+                        )
+                    )
+                for cust, cnt, neg_cnt, neg_amt in (await db.execute(cust_ord_q)).all():
+                    if cust:
+                        _dim_order_count[str(cust)] = int(cnt)
+                        _dim_neg_orders[str(cust)] = int(neg_cnt) if neg_cnt else 0
+                        _dim_neg_amount[str(cust)] = float(neg_amt or 0)
+
+            # Also compute customer-level order stats when showing customer_breakdown
+            # under non-customer dimension (e.g., product_bgbu with product filter)
+            if need_customer_bd and not _is_customer_dim and product:
+                cust_ord_q2 = select(
+                    IncomeMarginDetail.superior_name,
+                    func.count(func.distinct(IncomeMarginDetail.order_id)).label("order_count"),
+                    func.count(func.distinct(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.order_id)))).label("neg_order_count"),
+                    func.sum(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.gross_profit_amount), else_=0)).label("neg_margin_amount"),
+                ).where(
+                    IncomeMarginDetail.period.in_(list(current_members)),
+                    imd_bgbu_cond,
+                    IncomeMarginDetail.superior_name.isnot(None),
+                    or_(
+                        IncomeMarginDetail.product_bgbu == product,
+                        IncomeMarginDetail.sales_product_name == product,
+                    ),
+                ).group_by(IncomeMarginDetail.superior_name)
+                for cust, cnt, neg_cnt, neg_amt in (await db.execute(cust_ord_q2)).all():
+                    if cust:
+                        _dim_order_count[str(cust)] = int(cnt)
+                        _dim_neg_orders[str(cust)] = int(neg_cnt) if neg_cnt else 0
+                        _dim_neg_amount[str(cust)] = float(neg_amt or 0)
+
+            # Also compute contract_type-level order stats when showing contract_type_breakdown
+            if need_ct_bd and product:
+                ct_ord_q = select(
+                    IncomeMarginDetail.contract_type_merged,
+                    func.count(func.distinct(IncomeMarginDetail.order_id)).label("order_count"),
+                    func.count(func.distinct(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.order_id)))).label("neg_order_count"),
+                    func.sum(case((IncomeMarginDetail.gross_profit_amount < 0, IncomeMarginDetail.gross_profit_amount), else_=0)).label("neg_margin_amount"),
+                ).where(
+                    IncomeMarginDetail.period.in_(list(current_members)),
+                    imd_bgbu_cond,
+                    IncomeMarginDetail.contract_type_merged.isnot(None),
+                    or_(
+                        IncomeMarginDetail.product_bgbu == product,
+                        IncomeMarginDetail.sales_product_name == product,
+                    ),
+                ).group_by(IncomeMarginDetail.contract_type_merged)
+                for ct, cnt, neg_cnt, neg_amt in (await db.execute(ct_ord_q)).all():
+                    if ct:
+                        _dim_order_count[str(ct)] = int(cnt)
+                        _dim_neg_orders[str(ct)] = int(neg_cnt) if neg_cnt else 0
+                        _dim_neg_amount[str(ct)] = float(neg_amt or 0)
 
         def _sum_bucket_values(buckets_by_period: dict[str, dict[str, float]], periods: list[str]) -> dict[str, float]:
             aggregated: dict[str, float] = defaultdict(float)
@@ -1017,8 +1233,6 @@ class MetricsService:
         if has_entity_filter:
             if yoy_curr:
                 yoy_rev, yoy_cost, yoy_gp = _filtered_bucket_values(yoy_curr)
-                print(f"[DEBUG_YOY] product={product!r}, yoy_curr={yoy_curr}, yoy_rev={yoy_rev}, period_bucket_keys={list(period_bucket.keys())}, members={_period_members(yoy_curr)}", flush=True)
-                print(f"[DEBUG YoY filtered] yoy_rev={yoy_rev}, period_bucket_keys={list(period_bucket.keys())[:5]}, period_dim_bucket_keys={list(period_dim_bucket.keys())[:5]}", flush=True)
         else:
             if yoy_curr:
                 yoy_rev, yoy_cost, yoy_gp = _bucket_values(yoy_curr)
@@ -1139,6 +1353,10 @@ class MetricsService:
                             neg_margin_orders.append((o_rev, o_gp))
             if total_orders_count > 0:
                 high_margin_ratio = min(high_orders / total_orders_count * 100, 100.0)
+        elif _is_company_dim:
+            # Company dimension uses lightweight query (_company_order_count)
+            # instead of full order aggregation — suppress warning
+            pass
         else:
             warnings.append("no order-level data; high_margin_order_ratio not calculable")
 
@@ -1174,11 +1392,20 @@ class MetricsService:
             base_gross_profit=_round(yoy_gp),
             revenue_mom_growth=_round(rev_mom),
             gross_profit_mom_growth=_round(gp_mom),
+            direct_sign_revenue=_round(direct_sign_rev) if direct_sign_rev else None,
+            direct_sign_revenue_pct=_round(_safe_div(direct_sign_rev, rev) * 100) if (direct_sign_rev and rev) else None,
+            direct_sign_profit=_round(direct_sign_gp) if direct_sign_gp else None,
+            direct_sign_margin=_round(_safe_div(direct_sign_gp, direct_sign_rev) * 100) if (direct_sign_gp and direct_sign_rev) else None,
         )
 
         # ── Order-based metrics (computed in single-pass loop above) ──
-        summary.order_count = len(order_ids) if order_ids else None
-        summary.loss_ratio = round(loss_orders / total_orders_count * 100, 2) if total_orders_count else None
+        if order_ids:
+            summary.order_count = len(order_ids)
+            summary.loss_ratio = round(loss_orders / total_orders_count * 100, 2) if total_orders_count else None
+        elif _company_order_count:
+            # Fallback: use company-level lightweight query result
+            summary.order_count = _company_order_count
+            summary.loss_ratio = round(_company_neg_order_count / _company_order_count * 100, 2) if _company_order_count else None
 
         # ── Metrics only at company/dept scope (not product-filterable) ──
         if not has_entity_filter:
@@ -1216,35 +1443,66 @@ class MetricsService:
         if total_orders_count:
             summary.negative_margin_order_ratio = _round(len(neg_margin_orders) / total_orders_count * 100)
             summary.negative_margin_order_amount = _round(neg_margin_total)
+        elif _company_order_count:
+            # Fallback: use company-level lightweight query when full order aggregation was skipped
+            summary.negative_margin_order_ratio = _round(_company_neg_order_count / _company_order_count * 100)
+            summary.negative_margin_order_amount = _round(_company_neg_margin_amount)
 
         # Negative margin order ratio YoY/MoM change (pp)
-        if total_orders_count and summary.negative_margin_order_ratio is not None:
+        if summary.negative_margin_order_ratio is not None:
             cur = summary.negative_margin_order_ratio
 
-            def _order_neg_ratio(bk: dict) -> float | None:
-                if not bk:
-                    return None
-                neg = 0
-                for _, ob in bk.items():
-                    o_rev = ob.get("revenue")
-                    o_cost = ob.get("cost")
-                    o_gp = ob.get("gross_profit")
-                    if o_gp is None and o_rev is not None and o_cost is not None:
-                        o_gp = o_rev - o_cost
-                    if o_rev is not None and o_gp is not None and o_gp < 0:
-                        neg += 1
-                return neg / len(bk) * 100
+            if total_orders_count:
+                # Full order data available — use per-period buckets
+                def _order_neg_ratio(bk: dict) -> float | None:
+                    if not bk:
+                        return None
+                    neg = 0
+                    for _, ob in bk.items():
+                        o_rev = ob.get("revenue")
+                        o_cost = ob.get("cost")
+                        o_gp = ob.get("gross_profit")
+                        if o_gp is None and o_rev is not None and o_cost is not None:
+                            o_gp = o_rev - o_cost
+                        if o_rev is not None and o_gp is not None and o_gp < 0:
+                            neg += 1
+                    return neg / len(bk) * 100
 
-            if yoy_curr:
-                yoy_orders = _sum_nested_bucket_values(period_order, _period_members(yoy_curr))
-                yoy_r = _order_neg_ratio(yoy_orders)
-                if yoy_r is not None:
-                    summary.negative_margin_order_yoy_change = _round(cur - yoy_r, 2)
-            if mom_period:
-                mom_orders = _sum_nested_bucket_values(period_order, _period_members(mom_period))
-                mom_r = _order_neg_ratio(mom_orders)
-                if mom_r is not None:
-                    summary.negative_margin_order_mom_change = _round(cur - mom_r, 2)
+                if yoy_curr:
+                    yoy_orders = _sum_nested_bucket_values(period_order, _period_members(yoy_curr))
+                    yoy_r = _order_neg_ratio(yoy_orders)
+                    if yoy_r is not None:
+                        summary.negative_margin_order_yoy_change = _round(cur - yoy_r, 2)
+                if mom_period:
+                    mom_orders = _sum_nested_bucket_values(period_order, _period_members(mom_period))
+                    mom_r = _order_neg_ratio(mom_orders)
+                    if mom_r is not None:
+                        summary.negative_margin_order_mom_change = _round(cur - mom_r, 2)
+            elif _company_order_count:
+                # Fallback: lightweight scalar queries for YoY/MoM
+                async def _company_neg_ratio(periods: list[str]) -> float | None:
+                    if not periods:
+                        return None
+                    co_q2 = select(
+                        func.count(func.distinct(AggOrderSummary.order_id)).label("order_count"),
+                        func.count(func.distinct(case((AggOrderSummary.gross_profit < 0, AggOrderSummary.order_id)))).label("neg_order_count"),
+                    ).where(
+                        AggOrderSummary.period.in_(periods),
+                        AggOrderSummary.bgbu == bgbu_filter,
+                    )
+                    r = (await db.execute(co_q2)).one()
+                    cnt = int(r[0] or 0)
+                    neg_cnt = int(r[1] or 0)
+                    return neg_cnt / cnt * 100 if cnt else None
+
+                if yoy_curr and _period_members(yoy_curr):
+                    yoy_r = await _company_neg_ratio(_period_members(yoy_curr))
+                    if yoy_r is not None:
+                        summary.negative_margin_order_yoy_change = _round(cur - yoy_r, 2)
+                if mom_period and _period_members(mom_period):
+                    mom_r = await _company_neg_ratio(_period_members(mom_period))
+                    if mom_r is not None:
+                        summary.negative_margin_order_mom_change = _round(cur - mom_r, 2)
 
         # Negative margin product metrics
         neg_margin_products: list[float] = []
@@ -1450,6 +1708,9 @@ class MetricsService:
         def _count_consecutive_in_range(periods: list[str], metric_key: str) -> tuple[int, float | None]:
             """Count max consecutive MoM growth streak and average growth rate.
 
+            Uses period_bucket raw values (single-month), NOT cumulative MoM rates
+            from trend series, to avoid streak inflation from cumulative sums.
+
             Returns (streak_count, avg_mom_growth_pct). avg is None if streak < 1.
             """
             if len(periods) < 2:
@@ -1467,7 +1728,6 @@ class MetricsService:
             # Compute MoM changes + rates for adjacent pairs within range
             mom_changes: list[bool] = []
             mom_rates: list[float] = []  # corresponding growth rates for streak periods
-            pair_periods: list[tuple[str, str]] = []  # (prev, curr) for each pair
             for i in range(1, len(values)):
                 prev_val = values[i - 1][1]
                 curr_val = values[i][1]
@@ -1477,7 +1737,6 @@ class MetricsService:
                     mom_rates.append((curr_val - prev_val) / prev_val * 100)
                 else:
                     mom_rates.append(0.0)
-                pair_periods.append((values[i - 1][0], values[i][0]))
             # Find longest consecutive growth streak and compute its avg rate
             max_streak = 0
             max_streak_end = -1
@@ -1700,11 +1959,13 @@ class MetricsService:
                 gross_margin=_round(c_gm),
                 revenue_contribution=_round(c_rev_contrib),
                 gross_margin_contribution=_round(c_contrib),
+                neg_margin_order_count=_dim_neg_orders.get(cust_name),
+                neg_margin_amount=_round(abs(_dim_neg_amount.get(cust_name, 0))) if _dim_neg_amount.get(cust_name) else None,
                 calculable=(c_rev is not None and c_gp is not None),
             ))
 
-        # ── Product line breakdown (query product_line dim_type directly) ─
-        product_line_breakdown: list[BreakdownItem] = []
+        # ── Product line breakdown (query product_bgbu dim_type directly) ─
+        product_bgbu_breakdown: list[BreakdownItem] = []
         if need_breakdowns or need_summary:
             pl_q = select(
                 AggDimensionSummary.dim_value,
@@ -1714,8 +1975,11 @@ class MetricsService:
             ).where(
                 AggDimensionSummary.period.in_(list(current_members)),
                 AggDimensionSummary.bgbu == bgbu_filter,
-                AggDimensionSummary.dim_type == "product_line",
-            ).group_by(AggDimensionSummary.dim_value)
+                AggDimensionSummary.dim_type == "product_bgbu",
+            )
+            if product:
+                pl_q = pl_q.where(AggDimensionSummary.dim_value == product)
+            pl_q = pl_q.group_by(AggDimensionSummary.dim_value)
             pl_rows = (await db.execute(pl_q)).all()
             total_pl_rev = sum(float(r[1] or 0) for r in pl_rows)
             if total_pl_rev > 0:
@@ -1726,7 +1990,7 @@ class MetricsService:
                     p_gm = _safe_div(p_gp, p_rev) * 100 if p_rev else None
                     p_contrib = _safe_div(p_gp, total_pl_rev) * 100 if total_pl_rev else None
                     p_rev_contrib = _safe_div(p_rev, total_pl_rev) * 100 if total_pl_rev else None
-                    product_line_breakdown.append(BreakdownItem(
+                    product_bgbu_breakdown.append(BreakdownItem(
                         dimension_value=pl_name,
                         revenue=_round(p_rev),
                         tax_excluded_cost=_round(p_cost),
@@ -1734,8 +1998,32 @@ class MetricsService:
                         gross_margin=_round(p_gm),
                         revenue_contribution=_round(p_rev_contrib),
                         gross_margin_contribution=_round(p_contrib),
+                        neg_margin_order_count=_dim_neg_orders.get(pl_name),
+                        neg_margin_amount=_round(abs(_dim_neg_amount.get(pl_name, 0))) if _dim_neg_amount.get(pl_name) else None,
                         calculable=(p_rev is not None and p_gp is not None),
                     ))
+
+        # ── Fix: if dimension is product_bgbu and main breakdowns is empty,
+        # populate from product_bgbu_breakdown (uses same data source) ──
+        if dimension == "product_bgbu" and not breakdowns and product_bgbu_breakdown:
+            # Re-fetch YoY data for revenue_yoy_growth on each item
+            yoy_dim_buckets = _sum_nested_bucket_values(
+                period_dim_bucket, _period_members(yoy_curr)
+            ) if yoy_curr and period_dim_bucket else {}
+            total_gp_for_contrib = sum(
+                (b.gross_profit or 0) for b in product_bgbu_breakdown
+            )
+            for item in product_bgbu_breakdown:
+                item_yoy_bk = yoy_dim_buckets.get(item.dimension_value, {})
+                item_yoy_rev = item_yoy_bk.get("revenue")
+                item_yoy_growth = (
+                    _safe_div(item.revenue - item_yoy_rev, item_yoy_rev) * 100
+                ) if (item.revenue is not None and item_yoy_rev) else None
+                item.revenue_yoy_growth = _round(item_yoy_growth)
+                item.gross_margin_contribution = _round(
+                    _safe_div(item.gross_profit, total_gp_for_contrib) * 100
+                ) if total_gp_for_contrib else None
+            breakdowns = list(product_bgbu_breakdown)
 
         # ── Contract type breakdown ───────────────────────────────
         contract_type_breakdown: list[BreakdownItem] = []
@@ -1759,6 +2047,8 @@ class MetricsService:
                 gross_margin=_round(c_gm),
                 revenue_contribution=_round(c_rev_contrib),
                 gross_margin_contribution=_round(c_contrib),
+                neg_margin_order_count=_dim_neg_orders.get(ct_name),
+                neg_margin_amount=_round(abs(_dim_neg_amount.get(ct_name, 0))) if _dim_neg_amount.get(ct_name) else None,
                 calculable=(c_rev is not None and c_gp is not None),
             ))
 
@@ -1768,7 +2058,7 @@ class MetricsService:
             entity=entity,
             summary=summary,
             breakdowns=breakdowns,
-            product_line_breakdown=product_line_breakdown,
+            product_bgbu_breakdown=product_bgbu_breakdown,
             customer_breakdown=customer_breakdown,
             contract_type_breakdown=contract_type_breakdown,
             trend_series=trend,

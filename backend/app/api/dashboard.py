@@ -67,7 +67,7 @@ async def _build_kpis(
 
     # Determine dimension based on active filters
     if product:
-        dim = "product_line"
+        dim = "product_bgbu"
     elif department:
         dim = "department"
     elif customer:
@@ -91,6 +91,7 @@ async def _build_kpis(
         customer=customer,
         bgbu_filter=bgbu_filter,
         sections={"summary", "trend_series"},
+        skip_order_metrics=True,
     )
     yoy = await MetricsService.get_core_metrics(
         db=db,
@@ -105,6 +106,7 @@ async def _build_kpis(
         customer=customer,
         bgbu_filter=bgbu_filter,
         sections={"summary", "trend_series"},
+        skip_order_metrics=True,
     )
     summary = current.summary
     yoy_summary = yoy.summary
@@ -165,11 +167,12 @@ async def _build_dimension_breakdowns(
         department=department,
         bgbu_filter=bgbu_filter,
         sections={"breakdowns"},
+        skip_order_metrics=True,
     )
     prod_response = await MetricsService.get_core_metrics(
         db=db,
         period=period,
-        dimension="product_line",
+        dimension="product_bgbu",
         compare=period_compare_type or "yoy",
         period_dimension=period_dimension or "monthly",
         period_start=period_start,
@@ -178,6 +181,7 @@ async def _build_dimension_breakdowns(
         department=department,
         bgbu_filter=bgbu_filter,
         sections={"breakdowns"},
+        skip_order_metrics=True,
     )
     return (
         [item.model_dump() for item in dept_response.breakdowns],
@@ -280,11 +284,11 @@ async def _build_dashboard_response(body, db: AsyncSession, cache_key: str, user
                 eff_bgbu = "ALL"
 
             if body.product:
-                # Product filter: read from AggDimensionSummary with product_line dim_type
+                # Product filter: read from AggDimensionSummary with product_bgbu dim_type
                 stmt_chart = (
                     select(AggDimensionSummary)
                     .where(
-                        AggDimensionSummary.dim_type == "product_line",
+                        AggDimensionSummary.dim_type == "product_bgbu",
                         AggDimensionSummary.dim_value == body.product,
                     )
                 )
