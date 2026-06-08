@@ -282,7 +282,10 @@ const dimColLabel = computed(() => {
 });
 
 // Secondary dimension label for titles
-const secondaryDimLabel = computed(() => secondaryDimension.value === 'customer' ? '客户' : '产品线');
+const secondaryDimLabel = computed(() => {
+  if (!secondaryDimension.value) return '部门';
+  return secondaryDimension.value === 'customer' ? '客户' : '产品线';
+});
 
 // Table columns
 const tableColumns = computed(() => [
