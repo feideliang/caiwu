@@ -781,7 +781,7 @@ watch(departmentScope, (newVal, oldVal) => {
   }
 });
 
-onMounted(async () => { await fetchOptions(); loadRecommendations(); });
+onMounted(async () => { await fetchOptions(); });
 </script>
 
 <style scoped lang="less">
